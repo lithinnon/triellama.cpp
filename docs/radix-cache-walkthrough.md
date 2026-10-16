@@ -75,7 +75,6 @@ RXC decouples KV-cache retention from GPU VRAM limits by managing three tiers of
 - **Host RAM (`--cache-ram`, `-cram`):** Limits total memory occupied by warm Radix checkpoints. Setting `-cram -1` allows unlimited RAM utilization. Setting `-cram 0` completely disables host RAM retention and streams checkpoints directly to NVMe SSD with true 0-RAM overhead.
 - **NVMe Disk (`--cache-disk`, `-cdisk`):** Global persistent SSD quota in MiB. Setting `-cdisk -1` allows unlimited disk caching up to physical drive capacity.
 - **Global Root Scavenging:** When `--cache-disk` is configured, the disk limit applies globally across all model subdirectories in `~/.cache/beellama.cpp/radix/`. If the combined footprint exceeds the quota, cross-model LRU scavenging automatically purges the globally oldest `.ckpt` files first.
-- **Eviction Policies (`--radix-eviction`):** When quotas are reached, colder nodes are selected via `lru` (Least Recently Used), `lfu` (Least Frequently Used), or `cost` (recomputation cost = `token count * access frequency`).
 
 ---
 
@@ -156,13 +155,9 @@ To guarantee zero cache corruption across server crashes or power failures, whil
 
 | Short | Long Flag | Environment Variable | Default | Description |
 |---|---|---|---|---|
-| `-rxc` | `--radix-cache` | `LLAMA_ARG_RADIX_CACHE` | `true` (server) | Enables dynamic Radix Tree prefix caching. |
-| `-no-rxc`| `--no-radix-cache`| — | — | Disables Radix Tree prefix caching. |
 | `-cram` | `--cache-ram N` | `LLAMA_ARG_CACHE_RAM` | `8192` | Host RAM quota in MiB (`-1` = unlimited, `0` = direct NVMe spill). |
 | `-cdisk`| `--cache-disk N` | `LLAMA_ARG_CACHE_DISK` | `0` | Global NVMe SSD quota in MiB (`-1` = unlimited, `0` = disabled). Enables persistent `.ckpt` storage and boot-time hydration across server restarts. |
 | — | `--cache-disk-dir PATH`| `LLAMA_ARG_CACHE_DISK_DIR` | `~/.cache/beellama.cpp/radix` | Root directory path for disk `.ckpt` files. Automatically isolates models and rehydrates prefix trees at boot. |
-| `-ctxcp`| `--ctx-checkpoints N`| `LLAMA_ARG_CTX_CHECKPOINTS` | `32` | Max checkpoints retained along a single branch. |
-| — | `--radix-eviction POLICY`| `LLAMA_ARG_RADIX_EVICTION` | `lru` | Eviction strategy: `lru`, `lfu`, or `cost`. |
 
 ---
 
@@ -175,7 +170,7 @@ llama-server \
   -m models/qwen3.6-27b-q5_k_s.gguf \
   -c 32768 -b 2048 -ub 512 \
   -ctk kvarn5 -ctv kvarn4 --kv-tail-tokens 1024 \
-  -rxc -cram 16384 \
+  -cram 16384 \
   --port 8080
 ```
 
@@ -197,7 +192,7 @@ Ingests long documents or serves coding agents (e.g. `pi`) with cold-restart per
 llama-server \
   -m models/qwen3.8-27b.gguf \
   -c 131072 -b 4096 -ub 512 \
-  -rxc -cdisk 32768 \
+  -cdisk 32768 \
   --port 8080
 ```
 

@@ -22,7 +22,6 @@ def run(args, cache):
                "-c", "64000", "-b", "2048", "-ub", "512", "-ngl", "all", "--spec-draft-ngl", "all",
                "--device", "CUDA0,CUDA1", "--spec-draft-device", "CUDA0,CUDA1", "--tensor-split", "51,49",
                "--load-mode", "dio", "--fit", "off", "--parallel", str(args.parallel),
-               "--ctx-checkpoints", "32", "--checkpoint-min-step", "512",
                "--host", "127.0.0.1", "--port", str(args.port), "--no-warmup", "-lv", "5"]
     result = {"command": command, "responses": [],
               "cuda_launch_blocking": os.getenv("CUDA_LAUNCH_BLOCKING"),

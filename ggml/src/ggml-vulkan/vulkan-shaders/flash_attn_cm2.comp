@@ -60,8 +60,6 @@ float16_t faDecodeK(const decodeBufFA_K bl_in, const uint blockCoords[2], const 
         case GGML_TYPE_Q3_1: return dequantFuncQ3_1(decodeBufQ3_1(bl_in), blockCoords, coordInBlock);
         case GGML_TYPE_Q2_0S: return dequantFuncQ2_0S(decodeBufQ2_0S(bl_in), blockCoords, coordInBlock);
         case GGML_TYPE_Q2_1: return dequantFuncQ2_1(decodeBufQ2_1(bl_in), blockCoords, coordInBlock);
-        case GGML_TYPE_SNC4: return dequantFuncSNC4(decodeBufSNC4(bl_in), blockCoords, coordInBlock);
-        case GGML_TYPE_SNC8: return dequantFuncSNC8(decodeBufSNC8(bl_in), blockCoords, coordInBlock);
         default: return float16_t(0);
     }
 }
@@ -82,8 +80,6 @@ float16_t faDecodeV(const decodeBufFA_V bl_in, const uint blockCoords[2], const 
         case GGML_TYPE_Q3_1: return dequantFuncQ3_1(decodeBufQ3_1(bl_in), blockCoords, coordInBlock);
         case GGML_TYPE_Q2_0S: return dequantFuncQ2_0S(decodeBufQ2_0S(bl_in), blockCoords, coordInBlock);
         case GGML_TYPE_Q2_1: return dequantFuncQ2_1(decodeBufQ2_1(bl_in), blockCoords, coordInBlock);
-        case GGML_TYPE_SNC4: return dequantFuncSNC4(decodeBufSNC4(bl_in), blockCoords, coordInBlock);
-        case GGML_TYPE_SNC8: return dequantFuncSNC8(decodeBufSNC8(bl_in), blockCoords, coordInBlock);
         default: return float16_t(0);
     }
 }
@@ -104,8 +100,6 @@ f16vec4 faDecodeKVector(const decodeBufFA_K bl_in, const uint blockCoords[2], co
         case GGML_TYPE_Q3_1: return dequantFuncQ3_1_v(decodeBufQ3_1(bl_in), blockCoords, coordInBlock);
         case GGML_TYPE_Q2_0S: return dequantFuncQ2_0S_v(decodeBufQ2_0S(bl_in), blockCoords, coordInBlock);
         case GGML_TYPE_Q2_1: return dequantFuncQ2_1_v(decodeBufQ2_1(bl_in), blockCoords, coordInBlock);
-        case GGML_TYPE_SNC4: return dequantFuncSNC4_v(decodeBufSNC4(bl_in), blockCoords, coordInBlock);
-        case GGML_TYPE_SNC8: return dequantFuncSNC8_v(decodeBufSNC8(bl_in), blockCoords, coordInBlock);
         default: return f16vec4(0);
     }
 }
@@ -125,8 +119,6 @@ f16vec4 faDecodeVVector(const decodeBufFA_V bl_in, const uint blockCoords[2], co
         case GGML_TYPE_Q3_1: return dequantFuncQ3_1_v(decodeBufQ3_1(bl_in), blockCoords, coordInBlock);
         case GGML_TYPE_Q2_0S: return dequantFuncQ2_0S_v(decodeBufQ2_0S(bl_in), blockCoords, coordInBlock);
         case GGML_TYPE_Q2_1: return dequantFuncQ2_1_v(decodeBufQ2_1(bl_in), blockCoords, coordInBlock);
-        case GGML_TYPE_SNC4: return dequantFuncSNC4_v(decodeBufSNC4(bl_in), blockCoords, coordInBlock);
-        case GGML_TYPE_SNC8: return dequantFuncSNC8_v(decodeBufSNC8(bl_in), blockCoords, coordInBlock);
         default: return f16vec4(0);
     }
 }

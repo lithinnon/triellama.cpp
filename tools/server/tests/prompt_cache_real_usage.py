@@ -254,8 +254,6 @@ class Server:
             "--cache-type-k", self.args.cache_type,
             "--cache-type-v", self.args.cache_type,
             "--cache-ram", str(self.args.cache_ram_mib),
-            "--ctx-checkpoints", str(self.args.ctx_checkpoints),
-            "--checkpoint-min-step", str(self.args.checkpoint_min_step),
         ]
         if self.args.unified:
             command.append("--kv-unified")
@@ -608,8 +606,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tail-tokens", type=int, default=512)
     parser.add_argument("--tail-type", default="f16")
     parser.add_argument("--cache-ram-mib", type=int, default=4096)
-    parser.add_argument("--ctx-checkpoints", type=int, default=32)
-    parser.add_argument("--checkpoint-min-step", type=int, default=0)
     parser.add_argument("--unified", action="store_true")
     parser.add_argument("--spec", choices=("none", "mtp", "dflash"), default="none")
     parser.add_argument("--draft-max", type=int, default=8)
@@ -649,8 +645,6 @@ def main() -> int:
                 "requested_lengths": [32, 64, 128, 256, 512, 1024],
                 "branch_rule": "drop-last-exchange when turn%7==0 or turn%8==1",
                 "cache_ram_mib": args.cache_ram_mib,
-                "ctx_checkpoints": args.ctx_checkpoints,
-                "checkpoint_min_step": args.checkpoint_min_step,
             },
             indent=2,
             sort_keys=True,

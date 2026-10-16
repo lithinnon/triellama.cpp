@@ -722,18 +722,15 @@ struct common_params {
     int32_t n_cache_reuse       = 0;     // min chunk size to reuse from the cache via KV shifting
     bool    cache_prompt        = true;  // whether to enable prompt caching
     bool    cache_idle_slots    = true;  // save and clear idle slots upon starting a new task
-    int32_t n_ctx_checkpoints   = 32;    // max number of context checkpoints per slot
+    int32_t n_ctx_checkpoints   = -1;    // legacy slot checkpoint count; -1 = unlimited (governed by RXC byte quotas)
     int32_t kv_unified_per_slot = 0;     // max context per parallel slot; 0 = unset
-    int32_t checkpoint_min_step = 8192;  // minimum spacing between context checkpoints
+    int32_t checkpoint_min_step = 0;     // legacy checkpoint spacing; 0 = boundary-driven
     int32_t cache_ram_mib       = 8192;  // -1 = no limit, 0 - disable, 1 = 1 MiB, etc.
 
     // Radix Cache (RXC) and tiered storage params
-    bool        radix_cache            = true;  // enable dynamic Radix tree prefix caching
-    bool        radix_cache_explicit   = false;
+    bool        radix_cache            = true;  // Radix Tree prefix caching is built-in and always enabled
     int32_t     cache_disk_mib         = 0;     // -1 = unlimited, 0 = disable, N = MiB
     std::string cache_disk_dir         = "";    // defaults to XDG_CACHE_HOME/beellama.cpp/radix
-    bool        checkpoint_min_step_explicit = false;
-    std::string radix_eviction         = "lru"; // "lru", "lfu", "cost"
     std::string public_path   = "";                                                                         // NOLINT
     std::string api_prefix    = "";                                                                         // NOLINT
     std::string chat_template = "";                                                                         // NOLINT

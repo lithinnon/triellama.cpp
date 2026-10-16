@@ -888,27 +888,38 @@ static void test(void) {
     params = common_params();
     argv = {
         "binary_name",
-        "-rxc",
         "-cdisk", "16384",
-        "--cache-disk-dir", "/tmp/test_rxc_disk",
-        "--radix-eviction", "cost"
+        "--cache-disk-dir", "/tmp/test_rxc_disk"
     };
     assert(true == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
     assert(params.radix_cache == true);
     assert(params.cache_disk_mib == 16384);
     assert(params.cache_disk_dir == "/tmp/test_rxc_disk");
-    assert(params.radix_eviction == "cost");
 
-    // test -no-rxc and unlimited disk
+    // test unlimited disk
     params = common_params();
     argv = {
         "binary_name",
-        "-no-rxc",
         "-cdisk", "-1"
     };
     assert(true == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
-    assert(params.radix_cache == false);
+    assert(params.radix_cache == true);
     assert(params.cache_disk_mib == -1);
+
+    // verify removed legacy checkpoint and radix flags fail parsing
+    params = common_params();
+    argv = {"binary_name", "-rxc"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "-no-rxc"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "-ctxcp", "32"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--ctx-checkpoints", "32"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "-cms", "512"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--checkpoint-min-step", "512"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
 
 // skip this part on windows, because setenv is not supported
 #ifdef _WIN32

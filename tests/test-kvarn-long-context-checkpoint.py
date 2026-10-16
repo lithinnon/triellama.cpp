@@ -93,7 +93,6 @@ def main() -> int:
     parser.add_argument("--load-mode", default="dio")
     parser.add_argument("--context", type=int, default=131072)
     parser.add_argument("--prompt-tokens", type=int, default=120000)
-    parser.add_argument("--checkpoint-min-step", type=int, default=8192)
     parser.add_argument("--cache-type", default="kvarn6")
     parser.add_argument("--tail-tokens", type=int, default=1024)
     parser.add_argument("--spec", choices=("mtp", "none"), default="mtp")
@@ -120,8 +119,7 @@ def main() -> int:
         "--flash-attn", "on", "--fit", "off",
         "--cache-type-k", args.cache_type, "--cache-type-v", args.cache_type,
         "--kv-tail-tokens", str(args.tail_tokens), "--kv-tail-type", "f16",
-        "--cache-ram", "32768", "--ctx-checkpoints", "32",
-        "--checkpoint-min-step", str(args.checkpoint_min_step),
+        "--cache-ram", "32768",
         "--metrics", "--slots", "--offline", "--seed", "12345",
         "--load-mode", args.load_mode, "--verbosity", "5",
     ]

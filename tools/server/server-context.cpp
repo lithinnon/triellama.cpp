@@ -1754,12 +1754,7 @@ private:
         }
         SRV_TRC("%s", "for more info see https://github.com/ggml-org/llama.cpp/pull/16391\n");
 
-        if (params_base.n_ctx_checkpoints > 0) {
-            SRV_TRC("context checkpoints enabled, max = %d, min spacing = %d\n",
-                    params_base.n_ctx_checkpoints, params_base.checkpoint_min_step);
-        } else {
-            SRV_TRC("%s", "context checkpoints disabled\n");
-        }
+        SRV_INF("%s", "Radix Cache prefix caching native engine active (governed by RAM/disk byte quotas)\n");
 
         if (!params_base.model_alias.empty()) {
             // backward compat: use first alias as model name
@@ -3071,22 +3066,12 @@ private:
             }
         }
 
-        while (slot.prompt.checkpoints.size() >= (size_t) params_base.n_ctx_checkpoints) {
-            // make room for the new checkpoint, if needed
-            const auto & cur = slot.prompt.checkpoints.front();
-
-            SLT_WRN(slot, "erasing old context checkpoint (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
-                    cur.pos_min, cur.pos_max, cur.n_tokens, (float) cur.size() / 1024 / 1024);
-
-            slot.prompt.checkpoints.erase(slot.prompt.checkpoints.begin());
-        }
-
         slot.prompt.checkpoints.push_back(std::move(cur));
         const auto & admitted = slot.prompt.checkpoints.back();
 
         SLT_TRC(slot,
-                "created context checkpoint %d of %d (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
-                (int) slot.prompt.checkpoints.size(), params_base.n_ctx_checkpoints, admitted.pos_min,
+                "created context checkpoint %d (pos_min = %d, pos_max = %d, n_tokens = %" PRId64 ", size = %.3f MiB)\n",
+                (int) slot.prompt.checkpoints.size(), admitted.pos_min,
                 admitted.pos_max, admitted.n_tokens, (float) admitted.size() / 1024 / 1024);
     }
 
@@ -3231,7 +3216,6 @@ private:
                 return 0;
             }
             std::list<common_prompt_checkpoint> checkpoints;
-            const size_t limit = size_t(std::max(0, params_base.n_ctx_checkpoints));
             for (uint32_t i = 0; i < count; ++i) {
                 common_prompt_checkpoint cur;
                 cur.id_task = -1;
@@ -3251,9 +3235,6 @@ private:
                     return 0;
                 }
                 checkpoints.push_back(std::move(cur));
-                if (checkpoints.size() > limit) {
-                    checkpoints.pop_front();
-                }
             }
             // Do not test-load draft state here: that would mutate the live slot.
             // The existing checkpoint transaction validates target, owned draft,
@@ -4619,19 +4600,10 @@ private:
                         alora_disabled_id = enabled_loras[0];
                     }
 
-                    bool do_checkpoint = params_base.n_ctx_checkpoints > 0;
-                    const int32_t checkpoint_min_step = params_base.checkpoint_min_step;
                     const auto & spans = slot.task->params.message_spans;
-                    // Structured chats already checkpoint user boundaries. Add
-                    // periodic anchors only for raw/unstructured prompts, where
-                    // no semantic edit boundary is available.
-                    const int64_t checkpoint_interval = spans.spans.empty() ?
-                            server_prompt_checkpoint_interval(
-                                    slot.n_ctx, params_base.n_ctx_checkpoints, checkpoint_min_step,
-                                    prompt_reuse_alignment()) : 0;
 
                     // make checkpoints only for completion tasks
-                    do_checkpoint = do_checkpoint && slot.task->type == SERVER_TASK_TYPE_COMPLETION;
+                    bool do_checkpoint = slot.task->type == SERVER_TASK_TYPE_COMPLETION;
 
                     // make a checkpoint of the parts of the memory that cannot be rolled back.
                     // checkpoints are created only if:
@@ -4738,22 +4710,14 @@ private:
                         }
                         slot.prompt.tokens.push_back(cur_tok);
 
-                        // break at the last user message, or at user messages at least min step past the last checkpoint
+                        // break at the last user message to establish turn boundary checkpoint
                         if (spans.is_user_start(slot.prompt.n_tokens())) {
                             const auto pos = slot.prompt.n_tokens();
                             const auto & checkpoints = slot.prompt.checkpoints;
 
-                            if (prompt_cache || pos == last_user_pos || checkpoints.empty() || pos > checkpoints.back().n_tokens + checkpoint_min_step) {
+                            if (prompt_cache || pos == last_user_pos || checkpoints.empty() || pos > checkpoints.back().n_tokens) {
                                 break;
                             }
-                        }
-
-                        // Split long prompts at a budgeted cadence so the durable
-                        // checkpoint set covers historical edits even without
-                        // structured message spans.
-                        if (do_checkpoint && checkpoint_interval > 0 &&
-                                slot.prompt.n_tokens() % checkpoint_interval == 0) {
-                            break;
                         }
 
                         // process the last few tokens of the prompt separately in order to allow for a checkpoint to be created.
@@ -4794,8 +4758,6 @@ private:
 
                     const bool is_user_start = spans.is_user_start(n_tokens_start);
                     const bool is_last_user_message = n_tokens_start == last_user_pos;
-                    const bool is_periodic_checkpoint = checkpoint_interval > 0 &&
-                            n_tokens_start > 0 && n_tokens_start % checkpoint_interval == 0;
                     // entire prompt has been processed
                     if (slot.prompt.n_tokens() == slot.task->n_tokens()) {
                         slot.state = SLOT_STATE_DONE_PROMPT;
@@ -4812,7 +4774,7 @@ private:
                     } else {
                         // skip ordinary mid-prompt checkpoints, unless the batch starts a user
                         // message or we are near the end of the prompt
-                        if (!is_user_start && !is_periodic_checkpoint && !near_prompt_end) {
+                        if (!is_user_start && !near_prompt_end) {
                             do_checkpoint = false;
                         }
                     }
@@ -4830,18 +4792,10 @@ private:
                     do_checkpoint = do_checkpoint && !has_mtmd;
                     do_checkpoint = do_checkpoint && n_tokens_cur > 0;
 
-                    // for Radix Cache, checkpointing is strictly boundary-driven (turn/message spans, prompt completion)
-                    if (prompt_cache) {
-                        do_checkpoint = do_checkpoint && (
-                                slot.prompt.checkpoints.empty() ||
-                                is_last_user_message || near_prompt_end);
-                    } else {
-                        // legacy flat slot spacing
-                        do_checkpoint = do_checkpoint && (
-                                slot.prompt.checkpoints.empty() ||
-                                is_last_user_message || near_prompt_end ||
-                                n_tokens_start >= slot.prompt.checkpoints.back().n_tokens + checkpoint_min_step);
-                    }
+                    // checkpointing is strictly boundary-driven (turn/message spans, prompt completion)
+                    do_checkpoint = do_checkpoint && (
+                            slot.prompt.checkpoints.empty() ||
+                            is_last_user_message || near_prompt_end);
 
                     SLT_DBG(slot, "main/do_checkpoint = %s, pos_min = %d, pos_max = %d\n", do_checkpoint ? "yes" : "no", pos_min, pos_max);
 

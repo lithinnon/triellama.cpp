@@ -12,8 +12,6 @@
 #define GGML_TYPE_Q3_1    46u
 #define GGML_TYPE_Q2_0S   47u
 #define GGML_TYPE_Q2_1    48u
-#define GGML_TYPE_SNC4    49u
-#define GGML_TYPE_SNC8    50u
 
 // Number of matrix elements per buffer block, derived from the K/V type spec
 // constant. F32 is treated as a vec4 "block" of 4 floats. F16 uses block size 1
@@ -35,8 +33,6 @@ uint fa_block_elems(uint ty) {
         case GGML_TYPE_Q3_1: return uint(QUANT_K_Q3_1);
         case GGML_TYPE_Q2_0S: return uint(QUANT_K_Q2_0S);
         case GGML_TYPE_Q2_1: return uint(QUANT_K_Q2_1);
-        case GGML_TYPE_SNC4: return uint(QUANT_K_SNC4);
-        case GGML_TYPE_SNC8: return uint(QUANT_K_SNC8);
         default:           return 1u;
     }
 }
@@ -51,8 +47,6 @@ uint fa_quant_r_mmq(uint ty) {
         case GGML_TYPE_Q5_0: return uint(QUANT_R_Q5_0);
         case GGML_TYPE_Q5_1: return uint(QUANT_R_Q5_1);
         case GGML_TYPE_Q8_0: return uint(QUANT_R_Q8_0);
-        case GGML_TYPE_SNC4: return uint(QUANT_R_SNC4);
-        case GGML_TYPE_SNC8: return uint(QUANT_R_SNC8);
         default:           return 1u;
     }
 }

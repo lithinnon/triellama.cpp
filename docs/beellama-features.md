@@ -800,11 +800,9 @@ prefix recovery across restarts.
 
 ### Key arguments
 
-- [`--radix-cache`](beellama-args.md#radix-cache-rxc-and-hierarchical-caching)
 - [`--cache-ram`](beellama-args.md#radix-cache-rxc-and-hierarchical-caching)
 - [`--cache-disk`](beellama-args.md#radix-cache-rxc-and-hierarchical-caching)
 - [`--cache-disk-dir`](beellama-args.md#radix-cache-rxc-and-hierarchical-caching)
-- [`--radix-eviction`](beellama-args.md#radix-cache-rxc-and-hierarchical-caching)
 
 ### Measurement and validation
 
