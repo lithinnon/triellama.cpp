@@ -882,20 +882,8 @@ struct server_prompt_data {
     }
 };
 
-struct server_prompt_cache_state {
-    server_prompt prompt;
-    server_prompt_data data;
-
-    size_t accounted_size() const {
-        size_t res = data.size();
-
-        for (const auto & ckpt : prompt.checkpoints) {
-            res += ckpt.size();
-        }
-
-        return res;
-    }
-};
+struct server_radix_node;
+using server_prompt_cache_state = server_radix_node;
 
 struct server_prompt_cache {
     server_prompt_cache(
@@ -905,8 +893,6 @@ struct server_prompt_cache {
             int32_t disk_quota_mib = 0,
             const std::string & disk_dir = "");
     ~server_prompt_cache();
-
-    std::list<server_prompt_cache_state> states;
 
     // in bytes, 0 = no limit
     size_t limit_size = 0;
@@ -936,6 +922,9 @@ struct server_prompt_cache {
 
     size_t n_tokens() const;
 
+    size_t size() const;
+    bool empty() const;
+
     server_prompt_cache_state * alloc(const server_prompt & prompt, size_t state_size_main, size_t state_size_drft);
 
     server_prompt_cache_state * insert(const server_prompt & prompt, server_prompt_data && data);
@@ -963,9 +952,6 @@ struct server_prompt_cache {
             server_prompt_restore_timings * timings = nullptr);
 
     void update();
-
-private:
-    server_prompt_cache_state * admit(server_prompt_cache_state && candidate);
 };
 
 // used exclusively by router mode

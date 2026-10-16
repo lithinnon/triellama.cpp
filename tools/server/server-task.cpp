@@ -1808,157 +1808,74 @@ server_prompt_cache::server_prompt_cache(
 server_prompt_cache::~server_prompt_cache() = default;
 
 size_t server_prompt_cache::accounted_size() const {
-    size_t res = 0;
-    std::unordered_set<const void *> checkpoint_storage;
-
-    for (const auto & state : states) {
-        res += state.data.size();
-        for (const auto & checkpoint : state.prompt.checkpoints) {
-            if (!checkpoint.data_tgt.empty() &&
-                    checkpoint_storage.insert(checkpoint.data_tgt.storage_id()).second) {
-                res += checkpoint.data_tgt.size();
-            }
-            if (!checkpoint.data_dft.empty() &&
-                    checkpoint_storage.insert(checkpoint.data_dft.storage_id()).second) {
-                res += checkpoint.data_dft.size();
-            }
-            res += checkpoint.data_spec.size();
-        }
+    if (radix_enabled && radix_tree) {
+        return radix_tree->accounted_ram_bytes();
     }
-
-    if (res == 0 && radix_enabled && radix_tree) {
-        res = radix_tree->accounted_ram_bytes();
-    }
-
-    return res;
+    return 0;
 }
 
 size_t server_prompt_cache::n_tokens() const {
-    size_t res = 0;
-
-    for (const auto & state : states) {
-        res += state.prompt.n_tokens();
+    if (radix_enabled && radix_tree) {
+        return radix_tree->total_tokens();
     }
-
-    if (res == 0 && radix_enabled && radix_tree) {
-        res = radix_tree->total_tokens();
-    }
-
-    return res;
+    return 0;
 }
 
-server_prompt_cache_state * server_prompt_cache::admit(server_prompt_cache_state && candidate) {
+size_t server_prompt_cache::size() const {
+    if (radix_enabled && radix_tree) {
+        return radix_tree->total_checkpoints();
+    }
+    return 0;
+}
+
+bool server_prompt_cache::empty() const {
+    return size() == 0;
+}
+
+server_prompt_cache_state * server_prompt_cache::insert(
+        const server_prompt & prompt,
+        server_prompt_data && data) {
     ++admission_attempts;
-    // first check if the current state is contained fully in the cache
-    for (auto it = states.begin(); it != states.end(); ++it) {
-        const int cur_lcp_len = it->prompt.tokens.get_common_prefix(candidate.prompt.tokens);
 
-        if (cur_lcp_len == (int) candidate.prompt.tokens.size()) {
-            SRV_TRC("%s", " - prompt is already in the cache, skipping\n");
-            ++admission_failures;
-            return nullptr;
-        }
+    if (!radix_enabled || !radix_tree) {
+        ++admission_failures;
+        return nullptr;
     }
 
-    // Count retained immutable checkpoint buffers once across cache entries.
-    // Copying a server_prompt shares these buffers and detaches on mutation.
-    std::unordered_set<const void *> retained_checkpoint_storage;
-    for (const auto & state : states) {
-        for (const auto & checkpoint : state.prompt.checkpoints) {
-            retained_checkpoint_storage.insert(checkpoint.data_tgt.storage_id());
-            retained_checkpoint_storage.insert(checkpoint.data_dft.storage_id());
-        }
-    }
-    size_t checkpoints_size = 0;
-    for (const auto & ckpt : candidate.prompt.checkpoints) {
-        if (!ckpt.data_tgt.empty() &&
-                retained_checkpoint_storage.insert(ckpt.data_tgt.storage_id()).second) {
-            checkpoints_size += ckpt.data_tgt.size();
-        }
-        if (!ckpt.data_dft.empty() &&
-                retained_checkpoint_storage.insert(ckpt.data_dft.storage_id()).second) {
-            checkpoints_size += ckpt.data_dft.size();
-        }
-        checkpoints_size += ckpt.data_spec.size();
+    if (auto match = radix_tree->find_best_match(prompt.tokens, 1, 0);
+        match.node && match.node->is_checkpoint &&
+        (match.node->tier == RADIX_TIER_RAM || match.node->tier == RADIX_TIER_DISK) &&
+        match.lexical_tokens == prompt.tokens.size() &&
+        match.node->prompt.tokens.size() == prompt.tokens.size()) {
+        SRV_TRC("%s", " - prompt is already in the cache, skipping\n");
+        ++admission_failures;
+        return nullptr;
     }
 
-    const size_t state_size_new = candidate.data.size() + checkpoints_size;
-    const size_t standalone_size = candidate.accounted_size();
+    size_t standalone_size = data.size();
+    for (const auto & ckpt : prompt.checkpoints) {
+        standalone_size += ckpt.size();
+    }
 
-    // skip over-limit entries to avoid disturbing the cache
-    if (limit_size > 0 && (state_size_new > limit_size || standalone_size > limit_size)) {
+    if (limit_size > 0 && standalone_size > limit_size) {
         SRV_WRN(" - prompt state size %.3f MiB exceeds cache size limit %.3f MiB, skipping\n",
                 standalone_size / (1024.0 * 1024.0), limit_size / (1024.0 * 1024.0));
         ++admission_failures;
         return nullptr;
     }
 
-    // Publish the already-materialized candidate node before touching existing
-    // entries.  list node allocation is the last fallible admission step; if it
-    // fails, the cache is unchanged.
-    try {
-        states.push_back(std::move(candidate));
-    } catch (const std::bad_alloc & e) {
-        SRV_ERR("failed to allocate prompt cache entry: %s\n", e.what());
+    auto node = radix_tree->insert(prompt, std::move(data));
+    if (!node) {
         ++admission_failures;
         return nullptr;
     }
-    auto admitted = std::prev(states.end());
 
-    // remove any cached prompts that are fully contained in the current prompt
-    for (auto it = states.begin(); it != states.end();) {
-        if (it == admitted) {
-            ++it;
-            continue;
-        }
-        const int len = it->prompt.tokens.get_common_prefix(admitted->prompt.tokens);
-
-        if (len == (int) it->prompt.tokens.size()) {
-            SRV_TRC(" - removing obsolete cached prompt with length %d\n", len);
-
-            it = states.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    if (limit_size > 0) {
-        // The candidate is already present and fully materialized. Evict only
-        // older entries until unique payload accounting is within budget.
-        while (!states.empty() && accounted_size() > limit_size) {
-            SRV_WRN(" - making room for prompt cache entry, removing oldest entry (size = %.3f MiB)\n",
-                    states.front().accounted_size() / (1024.0 * 1024.0));
-
-            states.pop_front();
-        }
+    if (tier_manager) {
+        tier_manager->enforce_ram_limit(*radix_tree, limit_size);
     }
 
     ++admission_successes;
-    return &*admitted;
-}
-
-server_prompt_cache_state * server_prompt_cache::insert(
-        const server_prompt & prompt,
-        server_prompt_data && data) {
-    if (radix_enabled && radix_tree) {
-        server_prompt_data data_copy;
-        data_copy.main = data.main;
-        data_copy.drft = data.drft;
-        data_copy.spec = data.spec;
-        radix_tree->insert(prompt, std::move(data_copy));
-        if (tier_manager) {
-            tier_manager->enforce_ram_limit(*radix_tree, limit_size);
-        }
-    }
-
-    server_prompt_cache_state candidate;
-    candidate.prompt = prompt.clone();
-    candidate.data = std::move(data);
-    auto * res = admit(std::move(candidate));
-    if (limit_size == 0 && tier_manager && tier_manager->is_disk_enabled()) {
-        states.clear();
-    }
-    return res;
+    return node.get();
 }
 
 server_prompt_cache_state * server_prompt_cache::alloc(
@@ -1979,16 +1896,16 @@ server_prompt_cache_state * server_prompt_cache::alloc(
 }
 
 bool server_prompt_cache::erase(const server_prompt_cache_state * entry) {
-    for (auto it = states.begin(); it != states.end(); ++it) {
-        if (&*it == entry) {
-            states.erase(it);
-            if (radix_enabled && radix_tree && states.empty()) {
-                radix_tree->clear();
-            }
-            return true;
-        }
+    if (!entry || !radix_enabled || !radix_tree) {
+        return false;
     }
-    return false;
+    auto non_const_entry = const_cast<server_radix_node *>(entry);
+    try {
+        auto sp = non_const_entry->shared_from_this();
+        return radix_tree->remove_node(sp);
+    } catch (const std::bad_weak_ptr &) {
+        return false;
+    }
 }
 
 server_prompt_restore_result server_prompt_restore_transaction_diagnostic(
@@ -2147,58 +2064,37 @@ bool server_prompt_cache::load(
         int32_t reuse_alignment,
         const server_prompt_cache_state_io & io,
         const server_prompt_cache_state * excluded) {
-    const auto live_plan = server_prompt_plan_reuse(
-            prompt, tokens_new, reuse_alignment, live_native_restorable_tokens, false);
-
-    size_t restorable_best = live_plan.restorable_tokens;
-    float f_keep_best = prompt.tokens.size() > 0 ?
-            float(restorable_best) / prompt.tokens.size() : -1.0f; // empty slot: any cache entry wins
-    float f_sim_best  = float(restorable_best) / tokens_new.size();
-
-    SRV_TRC(" - looking for better prompt, base f_keep = %.3f, f_sim = %.3f\n", f_keep_best, f_sim_best);
-
-    auto it_best = states.end();
-
-    // find the most similar cached prompt, that would also preserve the most context
-    for (auto it = states.begin(); it != states.end(); ++it) {
-        if (&*it == excluded) {
-            continue;
-        }
-        const auto plan_cur = server_prompt_plan_reuse(
-                it->prompt, tokens_new, reuse_alignment, 0, true);
-        const size_t lcp_cur = plan_cur.lexical_tokens;
-        const size_t restorable_cur = plan_cur.restorable_tokens;
-
-        const float f_keep_cur = float(lcp_cur) / it->prompt.tokens.size();
-        const float f_sim_cur  = float(lcp_cur) / tokens_new.size();
-
-        SRV_TRC("   - prompt with length %7zu, lcp = %7zu, f_keep = %.3f, f_sim = %.3f\n", it->prompt.tokens.size(), lcp_cur, f_keep_cur, f_sim_cur);
-
-        // don't trash large prompts
-        if (f_keep_cur < 0.25f) {
-            continue;
-        }
-
-        if (restorable_cur > restorable_best ||
-                (restorable_cur == restorable_best && f_keep_cur > f_keep_best)) {
-            restorable_best = restorable_cur;
-            f_keep_best = f_keep_cur;
-            f_sim_best  = f_sim_cur;
-
-            it_best = it;
-        }
+    if (!radix_enabled || !radix_tree) {
+        return true;
     }
 
-    if (it_best != states.end()) {
-        ++restore_attempts;
-        SRV_TRC(" - found better restorable prompt with n = %zu, f_keep = %.3f, f_sim = %.3f\n",
-                restorable_best, f_keep_best, f_sim_best);
+    auto match = radix_tree->find_best_match(tokens_new, reuse_alignment, live_native_restorable_tokens);
+    if (!match.node || match.node.get() == excluded) {
+        return true;
+    }
 
-        auto & data = it_best->data;
+    if ((match.node->tier == RADIX_TIER_DISK || match.node->tier == RADIX_TIER_RAM) &&
+            match.restorable_tokens > live_native_restorable_tokens) {
+        ++restore_attempts;
+        const bool from_disk = match.node->tier == RADIX_TIER_DISK;
+        if (from_disk) {
+            if (!tier_manager || !tier_manager->is_disk_enabled() || !tier_manager->load_from_disk(match.node)) {
+                ++restore_failures;
+                return false;
+            }
+            ++radix_hits_disk;
+        } else {
+            ++radix_hits_ram;
+        }
+
+        auto & data = match.node->data;
         if (data.main.empty() ||
                 io.has_draft != !data.drft.empty() ||
                 (!io.has_speculative && !data.spec.empty()) ||
                 !io.restore_transaction) {
+            if (limit_size == 0 && tier_manager && tier_manager->is_disk_enabled()) {
+                radix_tree->evict_ram_payload(match.node);
+            }
             ++restore_failures;
             return false;
         }
@@ -2207,67 +2103,23 @@ bool server_prompt_cache::load(
                     data.main.data(), data.main.size(),
                     data.drft.data(), data.drft.size(),
                     data.spec.data(), data.spec.size())) {
+            if (limit_size == 0 && tier_manager && tier_manager->is_disk_enabled()) {
+                radix_tree->evict_ram_payload(match.node);
+            }
             ++restore_failures;
             return false;
         }
 
-        prompt = it_best->prompt.clone();
+        prompt = match.node->prompt.clone();
+        match.node->touch();
         ++restore_successes;
-        ++radix_hits_ram;
-        return true;
-    }
 
-    // Check if Radix Tree holds a restorable chunk (either on disk or in RAM)
-    if (radix_enabled && radix_tree) {
-        auto match = radix_tree->find_best_match(tokens_new, reuse_alignment, live_native_restorable_tokens);
-        if (match.node && (match.node->tier == RADIX_TIER_DISK || match.node->tier == RADIX_TIER_RAM) &&
-                match.restorable_tokens > live_native_restorable_tokens) {
-            ++restore_attempts;
-            const bool from_disk = match.node->tier == RADIX_TIER_DISK;
-            if (from_disk) {
-                if (!tier_manager || !tier_manager->is_disk_enabled() || !tier_manager->load_from_disk(match.node)) {
-                    ++restore_failures;
-                    return false;
-                }
-                ++radix_hits_disk;
-            } else {
-                ++radix_hits_ram;
-            }
-
-            auto & data = match.node->data;
-            if (data.main.empty() ||
-                    io.has_draft != !data.drft.empty() ||
-                    (!io.has_speculative && !data.spec.empty()) ||
-                    !io.restore_transaction) {
-                if (limit_size == 0 && tier_manager && tier_manager->is_disk_enabled()) {
-                    radix_tree->evict_ram_payload(match.node);
-                }
-                ++restore_failures;
-                return false;
-            }
-
-            if (!io.restore_transaction(
-                        data.main.data(), data.main.size(),
-                        data.drft.data(), data.drft.size(),
-                        data.spec.data(), data.spec.size())) {
-                if (limit_size == 0 && tier_manager && tier_manager->is_disk_enabled()) {
-                    radix_tree->evict_ram_payload(match.node);
-                }
-                ++restore_failures;
-                return false;
-            }
-
-            prompt = match.node->prompt.clone();
-            match.node->touch();
-            ++restore_successes;
-
-            // In 0-RAM mode, immediately evict the RAM payload after DMA restore to prevent memory bloat
-            if (limit_size == 0 && tier_manager && tier_manager->is_disk_enabled()) {
-                radix_tree->evict_ram_payload(match.node);
-            }
-
-            return true;
+        // In 0-RAM mode, immediately evict the RAM payload after DMA restore to prevent memory bloat
+        if (limit_size == 0 && tier_manager && tier_manager->is_disk_enabled()) {
+            radix_tree->evict_ram_payload(match.node);
         }
+
+        return true;
     }
 
     return true;
@@ -2306,35 +2158,5 @@ void server_prompt_cache::update() {
     if (radix_enabled && radix_tree && tier_manager) {
         tier_manager->enforce_ram_limit(*radix_tree, limit_size);
         tier_manager->enforce_disk_limit(*radix_tree);
-    }
-    if (limit_size != (size_t) -1) {
-        while (!states.empty() && accounted_size() > limit_size) {
-            SRV_WRN(" - cache accounted-payload limit reached, removing oldest entry (size = %.3f MiB)\n", states.front().accounted_size() / (1024.0 * 1024.0));
-
-            states.pop_front();
-        }
-    }
-
-    // average size per token
-    const float size_per_token = std::max<float>(1.0f, float(accounted_size()) / (std::max<size_t>(1, n_tokens())));
-
-    // dynamically increase the token limit if it can fit in the memory limit
-    const size_t limit_tokens_cur = limit_size > 0 ? std::max<size_t>(limit_tokens, limit_size/size_per_token) : limit_tokens;
-
-    if (limit_tokens > 0) {
-        while (!states.empty() && n_tokens() > limit_tokens_cur) {
-            SRV_WRN(" - cache token limit (%zu, est: %zu) reached, removing oldest entry (size = %.3f MiB)\n",
-                    limit_tokens, limit_tokens_cur, states.front().accounted_size() / (1024.0 * 1024.0));
-
-            states.pop_front();
-        }
-    }
-
-    SRV_TRC(" - cache state: %zu prompts, %.3f MiB (limits: %.3f MiB, %zu tokens, %zu est)\n",
-            states.size(), accounted_size() / (1024.0 * 1024.0), limit_size / (1024.0 * 1024.0), limit_tokens, limit_tokens_cur);
-
-    for (const auto & state : states) {
-        SRV_TRC("   - prompt %p: %7d tokens, checkpoints: %2zu, %9.3f MiB\n",
-                (const void *)&state, state.prompt.n_tokens(), state.prompt.checkpoints.size(), state.accounted_size() / (1024.0 * 1024.0));
     }
 }

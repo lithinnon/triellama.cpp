@@ -2090,17 +2090,15 @@ private:
         return ret;
     }
 
-    // return true if at least one slot has been cleared
-    // TODO: improve logic
-    //       - smarter decision which slot to clear (LRU or longest prompt?)
-    //       - move slot to level 2 cache instead of removing?
-    //       - instead of purging, try to store and resume later?
+    // Reclaim KV cache space under VRAM pressure by spilling an LRU idle slot to the Radix cache and clearing its live cells
     bool try_clear_idle_slots() {
-        bool res = false;
-
         if (!params_base.kv_unified) {
-            return res;
+            return false;
         }
+
+        server_slot * best_slot = nullptr;
+        int64_t oldest_t = -1;
+        int max_tokens = 0;
 
         for (auto & slot : slots) {
             if (slot.is_processing()) {
@@ -2108,18 +2106,33 @@ private:
             }
 
             if (slot.prompt.n_tokens() > 0) {
-                SRV_WRN("purging slot %d with %zu tokens\n", slot.id, slot.prompt.tokens.size());
-
-                slot.prompt_clear();
-
-                res = true;
-
-                // clear slots one by one
-                break;
+                // Select least recently used idle slot; tie-break by largest token count to free maximum VRAM
+                if (!best_slot || slot.t_last_used < oldest_t ||
+                    (slot.t_last_used == oldest_t && slot.prompt.n_tokens() > max_tokens)) {
+                    best_slot = &slot;
+                    oldest_t = slot.t_last_used;
+                    max_tokens = slot.prompt.n_tokens();
+                }
             }
         }
 
-        return res;
+        if (best_slot == nullptr) {
+            return false;
+        }
+
+        // Before clearing the slot from VRAM, persist its state to the Radix cache so it can be resumed later
+        if (prompt_cache) {
+            SLT_INF(*best_slot, "spilling idle slot to radix cache (tokens: %d, t_last: %" PRId64 ")\n",
+                    best_slot->prompt.n_tokens(), best_slot->t_last_used);
+            best_slot->prompt_save(*prompt_cache);
+            prompt_cache->update();
+        }
+
+        SRV_INF("purging idle slot %d with %zu tokens to reclaim KV cache space\n",
+                best_slot->id, best_slot->prompt.tokens.size());
+        best_slot->prompt_clear();
+
+        return true;
     }
 
     std::vector<common_adapter_lora_info> construct_lora_list(const std::map<int, float> & config) const {

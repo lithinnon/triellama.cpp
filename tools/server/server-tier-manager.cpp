@@ -466,7 +466,7 @@ bool server_tier_manager::load_from_disk(const std::shared_ptr<server_radix_node
 }
 
 void server_tier_manager::enforce_ram_limit(server_radix_tree & tree, size_t limit_ram_bytes) {
-    if (limit_ram_bytes == (size_t) -1) {
+    if (limit_ram_bytes == (size_t) -1 || (limit_ram_bytes == 0 && !is_disk_enabled())) {
         return;
     }
 

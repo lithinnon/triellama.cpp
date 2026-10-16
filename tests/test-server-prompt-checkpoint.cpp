@@ -1,4 +1,5 @@
 #include "../tools/server/server-task.h"
+#include "../tools/server/server-radix-tree.h"
 
 #undef NDEBUG
 #include <cassert>
@@ -60,15 +61,14 @@ static common_memory_seq_rm_result test_seq_rm_suffix(
 
 static void prompt_cache_load_target_success_draft_failure_is_atomic() {
     server_prompt_cache cache(1, 0);
-    server_prompt_cache_state saved;
-    saved.prompt = make_prompt({1, 2, 3});
-    saved.data.main.resize(16);
-    saved.data.drft.resize(8);
-    cache.states.push_back(std::move(saved));
+    server_prompt_data data;
+    data.main.resize(16);
+    data.drft.resize(8);
+    assert(cache.insert(make_prompt({1, 2, 3}), std::move(data)) != nullptr);
 
     server_prompt current = make_prompt({9});
     current.checkpoints.emplace_back().data_tgt.resize(4);
-    server_tokens requested(llama_tokens {1, 2, 4}, false);
+    server_tokens requested(llama_tokens {1, 2, 3, 4}, false);
 
     bool restored_main = false;
     bool restored_draft = false;
@@ -111,7 +111,7 @@ static void prompt_cache_load_target_success_draft_failure_is_atomic() {
     assert(!restored_main && !restored_draft);
     assert(!cleared_main && !cleared_draft);
     assert(main_state == 90 && draft_state == 80);
-    assert(cache.states.size() == 1);
+    assert(cache.size() == 1);
     assert(current.tokens.size() == 1);
     assert(current.tokens[0] == 9);
     assert(current.checkpoints.size() == 1);
@@ -182,10 +182,9 @@ static void restore_transaction_validation_failure_identifies_prepare_leg() {
 
 static void prompt_cache_ranks_safe_restorable_prefix_before_lexical_lcp() {
     server_prompt_cache cache(1, 0);
-    server_prompt_cache_state saved;
-    saved.prompt = make_prompt({1, 2});
-    saved.data.main = {0x2a};
-    cache.states.push_back(std::move(saved));
+    server_prompt_data data;
+    data.main = {0x2a};
+    assert(cache.insert(make_prompt({1, 2}), std::move(data)) != nullptr);
 
     // The live slot has the larger lexical prefix, but no durable checkpoint
     // at the divergent boundary.  The self-contained RAM prompt is fully
@@ -467,9 +466,9 @@ static void prompt_cache_snapshot_restore_evict_stress() {
         assert(cache.load(destination, requested, 0, 1, io));
         assert(destination.tokens.size() == source.tokens.size());
         assert(logical_state == uint8_t(i));
-        assert(cache.states.size() == 1);
+        assert(cache.size() == 1);
         assert(cache.erase(admitted));
-        assert(cache.states.empty());
+        assert(cache.empty());
         assert(cache.accounted_size() == 0);
     }
 
@@ -529,31 +528,26 @@ int main() {
         assert(prompt.checkpoints.front().data_tgt.storage_id() != shared_storage);
         assert(clone.checkpoints.front().data_tgt.size() == 16);
 
-        server_prompt_cache_state state {
-            /*.prompt =*/ std::move(prompt),
-            /*.data =*/ {
-                /*.main =*/ std::vector<uint8_t>(64),
-                /*.drft =*/ std::vector<uint8_t>(32),
-                /*.spec =*/ { },
-            },
-        };
+        server_radix_node state;
+        state.prompt = std::move(prompt);
+        state.data.main = std::vector<uint8_t>(64);
+        state.data.drft = std::vector<uint8_t>(32);
         assert(state.accounted_size() == 128);
     }
 
     {
         server_prompt_cache cache(1, 0);
-        server_prompt_cache_state existing;
-        existing.prompt = make_prompt({1, 2});
-        existing.data.main.resize(700*KIB);
-        cache.states.push_back(std::move(existing));
+        server_prompt_data existing_data;
+        existing_data.main.resize(700*KIB);
+        assert(cache.insert(make_prompt({1, 2}), std::move(existing_data)) != nullptr);
 
         server_prompt current = make_prompt({3, 4});
         auto * saved = cache.alloc(current, 600*KIB, 0);
 
         assert(saved != nullptr);
         assert(cache.accounted_size() <= cache.limit_size);
-        assert(cache.states.size() == 1);
-        assert(cache.states.back().data.main.size() == 600*KIB);
+        assert(cache.size() == 1);
+        assert(saved->data.main.size() == 600*KIB);
     }
 
     {
@@ -572,10 +566,9 @@ int main() {
 
     {
         server_prompt_cache cache(1, 0);
-        server_prompt_cache_state existing;
-        existing.prompt = make_prompt({1, 2});
-        existing.data.main.resize(100*KIB);
-        cache.states.push_back(std::move(existing));
+        server_prompt_data existing_data;
+        existing_data.main.resize(100*KIB);
+        assert(cache.insert(make_prompt({1, 2}), std::move(existing_data)) != nullptr);
 
         server_prompt current = make_prompt({3, 4});
         auto & ckpt = current.checkpoints.emplace_back();
@@ -583,7 +576,7 @@ int main() {
         ckpt.data_tgt.resize(200*KIB);
 
         assert(cache.alloc(current, 900*KIB, 0) == nullptr);
-        assert(cache.states.size() == 1);
+        assert(cache.size() == 1);
         assert(cache.accounted_size() == 100*KIB);
     }
 
@@ -592,22 +585,17 @@ int main() {
         server_prompt current = make_prompt({3, 4});
         assert(cache.alloc(current, 100*KIB, 0) != nullptr);
         assert(cache.alloc(current, 100*KIB, 0) == nullptr);
-        assert(cache.states.size() == 1);
+        assert(cache.size() == 1);
     }
 
     {
         server_prompt source = make_prompt({7, 8, 9});
         source.checkpoints.emplace_back().data_tgt.resize(200*KIB);
         server_prompt_cache cache(0, 0);
-        server_prompt_cache_state first;
-        first.prompt = source.clone();
-        first.data.main.resize(10*KIB);
-        server_prompt_cache_state second;
-        second.prompt = source.clone();
-        second.data.main.resize(20*KIB);
-        cache.states.push_back(std::move(first));
-        cache.states.push_back(std::move(second));
-        assert(cache.accounted_size() == 230*KIB);
+        server_prompt_data first_data;
+        first_data.main.resize(10*KIB);
+        assert(cache.insert(source, std::move(first_data)) != nullptr);
+        assert(cache.accounted_size() == 210*KIB);
     }
 
     {
