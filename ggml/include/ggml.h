@@ -430,7 +430,7 @@ extern "C" {
         GGML_TYPE_NVFP4   = 40, // NVFP4 (4 blocks, E4M3 scale)
         GGML_TYPE_Q1_0    = 41,
         GGML_TYPE_Q2_0    = 42,
-        // BeeLlama KV-only formats.  Q2_0S is deliberately distinct from
+        // TrieLlama KV-only formats.  Q2_0S is deliberately distinct from
         // upstream Q2_0: it has a 32-element block and different math.
         GGML_TYPE_Q6_0    = 43,
         GGML_TYPE_Q6_1    = 44,

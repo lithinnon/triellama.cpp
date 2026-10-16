@@ -1,10 +1,11 @@
-# BeeLlama.cpp HTTP Server
+# TrieLlama.cpp HTTP Server
 
-Fast, lightweight C/C++ HTTP server based on [httplib](https://github.com/yhirose/cpp-httplib), [nlohmann::json](https://github.com/nlohmann/json), and BeeLlama's upstream-compatible inference engine.
+Fast, lightweight C/C++ HTTP server based on [httplib](https://github.com/yhirose/cpp-httplib), [nlohmann::json](https://github.com/nlohmann/json), and TrieLlama's upstream-compatible inference engine.
 
-It provides LLM REST APIs and a web UI for local BeeLlama inference.
+It provides LLM REST APIs and a web UI for local TrieLlama inference.
 
 **Features:**
+ * Hierarchical Radix Prefix Caching across VRAM, RAM, and NVMe Disk ([documentation](../../docs/radix-cache-walkthrough.md))
  * LLM inference of F16 and quantized models on GPU and CPU
  * [OpenAI API](https://github.com/openai/openai-openapi) compatible chat completions, responses, and embeddings routes
  * [Anthropic Messages API](https://docs.anthropic.com/en/api/messages) compatible chat completions

@@ -1732,7 +1732,7 @@ private:
                 const std::string fingerprint = sanitized + "_" + hash_buf + "_k-" + (tk_name ? tk_name : "unknown") + "_v-" + (tv_name ? tv_name : "unknown");
 
                 if (resolved_disk_dir.empty()) {
-                    resolved_disk_dir = "/tmp/beellama.cpp/radix";
+                    resolved_disk_dir = "/tmp/triellama.cpp/radix";
                 }
                 if (resolved_disk_dir.find(fingerprint) == std::string::npos) {
                     resolved_disk_dir = (std::filesystem::path(resolved_disk_dir) / fingerprint).string();

@@ -705,7 +705,7 @@ static void test(void) {
     unset_test_env("LLAMA_ARG_SPEC_DRAFT_N_MAX");
 
     const std::filesystem::path dflash_fixture =
-            std::filesystem::temp_directory_path() / "beellama-dflash-depth-policy.gguf";
+            std::filesystem::temp_directory_path() / "triellama-dflash-depth-policy.gguf";
     gguf_context * fixture = gguf_init_empty();
     assert(fixture != nullptr);
     gguf_set_val_str(fixture, "general.architecture", "dflash");

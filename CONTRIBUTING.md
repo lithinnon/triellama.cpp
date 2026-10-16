@@ -1,8 +1,8 @@
 # Contributors
 
-BeeLlama.cpp inherits most llama.cpp contribution conventions. For fork-specific
-work, open issues and PRs against `Anbeeld/beellama.cpp`, and update the
-BeeLlama docs when speculative decoding, KVarN or low-bit KV-cache behavior,
+TrieLlama.cpp inherits most llama.cpp contribution conventions. For fork-specific
+work, open issues and PRs against `lithinnon/triellama.cpp`, and update the
+TrieLlama docs when radix caching, speculative decoding, KVarN or low-bit KV-cache behavior,
 or reasoning-loop behavior changes.
 
 The project differentiates between 3 levels of contributors:
@@ -190,6 +190,6 @@ Maintainers reserve the right to decline review or close pull requests for any r
 
 # Resources
 
-Use the BeeLlama.cpp issue tracker for fork-specific work. Upstream llama.cpp
+Use the TrieLlama.cpp issue tracker for fork-specific work. Upstream llama.cpp
 issues, PRs, discussions, and project boards are useful background for inherited
 code, but they are not the tracker for this fork.

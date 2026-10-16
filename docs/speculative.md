@@ -1,6 +1,6 @@
 # Speculative Decoding
 
-BeeLlama.cpp uses llama.cpp's speculative-decoding architecture. The target verifies several predicted tokens in one batch, which can improve generation speed when the draft is accepted often enough.
+TrieLlama.cpp uses llama.cpp's speculative-decoding architecture. The target verifies several predicted tokens in one batch, which can improve generation speed when the draft is accepted often enough.
 
 [Speculative decoding](https://en.wikipedia.org/wiki/Transformer_(deep_learning)#Speculative_decoding) is upstream-owned in this fork. Bee keeps upstream task, sampler, checkpoint, DFlash, DSpark, MTP, EAGLE-3, and n-gram behavior, then adds its maintained server controls around those paths.
 

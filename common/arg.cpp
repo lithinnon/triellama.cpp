@@ -1531,13 +1531,13 @@ static void common_params_radix_normalize(common_params & params) {
     if (params.cache_disk_dir.empty()) {
         const char * xdg_cache = getenv("XDG_CACHE_HOME");
         if (xdg_cache && xdg_cache[0] != '\0') {
-            params.cache_disk_dir = std::string(xdg_cache) + "/beellama.cpp/radix";
+            params.cache_disk_dir = std::string(xdg_cache) + "/triellama.cpp/radix";
         } else {
             const char * home = getenv("HOME");
             if (home && home[0] != '\0') {
-                params.cache_disk_dir = std::string(home) + "/.cache/beellama.cpp/radix";
+                params.cache_disk_dir = std::string(home) + "/.cache/triellama.cpp/radix";
             } else {
-                params.cache_disk_dir = "/tmp/beellama.cpp/radix";
+                params.cache_disk_dir = "/tmp/triellama.cpp/radix";
             }
         }
     }
@@ -2003,7 +2003,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
     ).set_env("LLAMA_ARG_CACHE_DISK").set_examples({LLAMA_EXAMPLE_SERVER}));
     add_opt(common_arg(
         {"--cache-disk-dir"}, "PATH",
-        "directory path for storing spilled Radix checkpoint chunks (default: ${XDG_CACHE_HOME:-~/.cache}/beellama.cpp/radix)",
+        "directory path for storing spilled Radix checkpoint chunks (default: ${XDG_CACHE_HOME:-~/.cache}/triellama.cpp/radix)",
         [](common_params & params, const std::string & value) {
             params.cache_disk_dir = value;
         }

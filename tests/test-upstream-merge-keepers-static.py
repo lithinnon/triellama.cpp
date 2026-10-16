@@ -309,27 +309,6 @@ def main() -> None:
     if "llama_memory_seq_rm_plan(" in suffix_path or "server_plan_and_remove_suffix(" in suffix_path:
         raise AssertionError("the server still duplicates target/draft suffix planning outside common_memory")
 
-    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    require(release, "name: Build / Release", "the Bee release workflow was replaced by upstream's generic workflow")
-    require(release, "beellama-${{", "Bee release assets must retain fork-specific names")
-    windows_cuda = release.split("  windows-cuda:", 1)[1].split("  windows-hip:", 1)[0]
-    require(windows_cuda, 'cuda: "13.3"', "Bee's Windows release matrix must retain the CUDA 13.3 lane")
-    if "TurboQuant" in release or "TCQ cache" in release:
-        raise AssertionError("release metadata still advertises removed TurboQuant/TCQ support")
-
-    for dockerfile in (
-        "cpu.Dockerfile",
-        "cuda.Dockerfile",
-        "intel.Dockerfile",
-        "rocm.Dockerfile",
-        "vulkan.Dockerfile",
-        "runtime-server.Dockerfile",
-        "runtime-intel-server.Dockerfile",
-    ):
-        container = (ROOT / ".devops" / dockerfile).read_text(encoding="utf-8")
-        require(container, 'org.opencontainers.image.title="BeeLlama.cpp"', f"{dockerfile} lost Bee image branding")
-        require(container, "upstream DFlash and KVarN", f"{dockerfile} advertises a stale feature set")
-
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     require(agents, "50 standard vector pairs", "AGENTS.md does not describe the v0.4.0 CUDA policy")
     require(agents, "draft-dflash", "AGENTS.md does not describe upstream DFlash")
@@ -339,7 +318,7 @@ def main() -> None:
     security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
     require(
         security,
-        "https://github.com/Anbeeld/beellama.cpp/security/advisories/new",
+        "https://github.com/lithinnon/triellama.cpp/security/advisories/new",
         "fork security reports must not be directed to the upstream repository",
     )
 

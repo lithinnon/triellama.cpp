@@ -91,7 +91,7 @@ $commonFlags = @(
 )
 
 Write-Host "========================================"
-Write-Host "BeeLlama.cpp Windows CUDA 13.3 sm_86 Default-Pairs Build"
+Write-Host "TrieLlama.cpp Windows CUDA 13.3 sm_86 Default-Pairs Build"
 Write-Host "FA mode: DEFAULT standard pairs; 15 default KVarN fast-decode pairs"
 Write-Host "CUDA:    $cudaVer"
 Write-Host "Arch:    sm_$cudaArch"

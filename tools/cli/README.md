@@ -1,4 +1,4 @@
-# BeeLlama.cpp command-line interface
+# TrieLlama.cpp command-line interface
 
 ## Usage
 

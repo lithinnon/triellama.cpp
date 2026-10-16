@@ -392,7 +392,7 @@ struct common_params_speculative_ngram_cache {
     std::string lookup_cache_dynamic; // path of dynamic ngram cache file for lookup decoding
 };
 
-// Upstream remains authoritative for all draft modes. BeeLlama's adaptive
+// Upstream remains authoritative for all draft modes. TrieLlama's adaptive
 // draft-max controller only chooses the next DFlash1 horizon; DFlash2 keeps
 // its fixed trained block limit and selector confidence.
 enum common_speculative_dm_controller {
@@ -730,7 +730,7 @@ struct common_params {
     // Radix Cache (RXC) and tiered storage params
     bool        radix_cache            = true;  // Radix Tree prefix caching is built-in and always enabled
     int32_t     cache_disk_mib         = 0;     // -1 = unlimited, 0 = disable, N = MiB
-    std::string cache_disk_dir         = "";    // defaults to XDG_CACHE_HOME/beellama.cpp/radix
+    std::string cache_disk_dir         = "";    // defaults to XDG_CACHE_HOME/triellama.cpp/radix
     std::string public_path   = "";                                                                         // NOLINT
     std::string api_prefix    = "";                                                                         // NOLINT
     std::string chat_template = "";                                                                         // NOLINT

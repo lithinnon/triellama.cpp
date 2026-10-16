@@ -110,7 +110,7 @@ if ($AllTests) {
 }
 
 Write-Host "========================================"
-Write-Host "BeeLlama.cpp Windows CUDA 13.3 sm_86 Build"
+Write-Host "TrieLlama.cpp Windows CUDA 13.3 sm_86 Build"
 Write-Host "CUDA:    $cudaVer"
 Write-Host "Arch:    sm_$cudaArch"
 Write-Host "Build:   $buildDir"

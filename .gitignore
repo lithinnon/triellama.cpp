@@ -158,7 +158,7 @@ a.out.*
 AGENTS.local.md
 .pi/SYSTEM.md
 
-# BeeLlama local artifacts
+# TrieLlama local artifacts
 
 /artifacts/
 /release-packages/*/

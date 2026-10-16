@@ -1,6 +1,6 @@
 # Radix Caching (RXC) Walkthrough and Guide
 
-Radix Caching (RXC) is BeeLlama's high-performance hierarchical prefix caching system. It structures KV-cache checkpoints into a compressed token-prefix trie (Radix Tree) and manages a 3-tier memory hierarchy across **GPU VRAM**, **Host System RAM**, and **NVMe SSD Disk**.
+Radix Caching (RXC) is TrieLlama's high-performance hierarchical prefix caching system. It structures KV-cache checkpoints into a compressed token-prefix trie (Radix Tree) and manages a 3-tier memory hierarchy across **GPU VRAM**, **Host System RAM**, and **NVMe SSD Disk**.
 
 This guide covers the architecture, storage tiers, KVarN alignment rules, checkpointing strategies, CLI flags, monitoring, and practical deployment workflows.
 
@@ -74,20 +74,20 @@ RXC decouples KV-cache retention from GPU VRAM limits by managing three tiers of
 ### Storage Quota Scavenging & Multi-Model Sharing
 - **Host RAM (`--cache-ram`, `-cram`):** Limits total memory occupied by warm Radix checkpoints. Setting `-cram -1` allows unlimited RAM utilization. Setting `-cram 0` completely disables host RAM retention and streams checkpoints directly to NVMe SSD with true 0-RAM overhead.
 - **NVMe Disk (`--cache-disk`, `-cdisk`):** Global persistent SSD quota in MiB. Setting `-cdisk -1` allows unlimited disk caching up to physical drive capacity.
-- **Global Root Scavenging:** When `--cache-disk` is configured, the disk limit applies globally across all model subdirectories in `~/.cache/beellama.cpp/radix/`. If the combined footprint exceeds the quota, cross-model LRU scavenging automatically purges the globally oldest `.ckpt` files first.
+- **Global Root Scavenging:** When `--cache-disk` is configured, the disk limit applies globally across all model subdirectories in `~/.cache/triellama.cpp/radix/`. If the combined footprint exceeds the quota, cross-model LRU scavenging automatically purges the globally oldest `.ckpt` files first.
 
 ---
 
 ## 3. Automatic Model & Quantization Isolation
 
-To eliminate vocabulary collisions, tensor shape mismatches, and quantization drift across model switches, BeeLlama automatically isolates disk checkpoints into dedicated model fingerprint subfolders:
+To eliminate vocabulary collisions, tensor shape mismatches, and quantization drift across model switches, TrieLlama automatically isolates disk checkpoints into dedicated model fingerprint subfolders:
 
 ```
 Subdirectory = <model_name>_<quant>_k-<ctk>_v-<ctv>
 ```
 
 ```
-~/.cache/beellama.cpp/radix/
+~/.cache/triellama.cpp/radix/
 ├── gemma4_26b_a4b_q4_k_medium_k-bf16_v-bf16/
 │   ├── chunk_1_35767465.ckpt
 │   └── chunk_3_35767518.ckpt
@@ -97,14 +97,14 @@ Subdirectory = <model_name>_<quant>_k-<ctk>_v-<ctv>
 ```
 
 - **Seamless Switching:** You can serve Gemma 4 in the morning and Qwen 2.5 in the afternoon without manually altering cache directories.
-- **Custom Overrides:** If you provide a custom path (e.g. `--cache-disk-dir /mnt/nvme/my_cache`), BeeLlama automatically constructs isolated fingerprint folders within your target directory.
+- **Custom Overrides:** If you provide a custom path (e.g. `--cache-disk-dir /mnt/nvme/my_cache`), TrieLlama automatically constructs isolated fingerprint folders within your target directory.
 
 ---
 
 ## 4. KVarN & Precision Tail Integration
 
 ### 128-Token Descriptor Alignment
-BeeLlama's KVarN target KV-cache compression groups attention state into 128-token rotated and normalized tiles (`KVAR_N_GROUP = 128`).
+TrieLlama's KVarN target KV-cache compression groups attention state into 128-token rotated and normalized tiles (`KVAR_N_GROUP = 128`).
 
 - **Durable Checkpoints:** RXC enforces that durable KVarN checkpoints snap to complete 128-token boundaries.
 - **Precision Tail Overlay:** Active trailing tokens (< 128 tokens) remain in exact F16/BF16 staging buffers without corrupting compressed historical tiles.
@@ -138,7 +138,7 @@ To guarantee zero cache corruption across server crashes or power failures, whil
 3. **Startup Orphan Pruning:**
    - When `llama-server` boots with `--cache-disk`, it automatically purges orphaned `.tmp` files left behind by prior ungraceful shutdowns.
 4. **Boot-Time Disk Hydration (`hydrate_from_disk`):**
-   - On server startup or daemon reboot, BeeLlama scans the model's disk cache subdirectory (`~/.cache/beellama.cpp/radix/<fingerprint>/`).
+   - On server startup or daemon reboot, TrieLlama scans the model's disk cache subdirectory (`~/.cache/triellama.cpp/radix/<fingerprint>/`).
    - Validates chunk headers and reads serialized token prefixes into candidate records.
    - Sorts candidate chunks ascending by token count, ensuring root prefixes are anchored before child branches.
    - Reconstructs the Radix Tree topology in memory via `insert_disk_node()`, preserving access timestamps, edge splits, and payload offsets.
@@ -157,7 +157,7 @@ To guarantee zero cache corruption across server crashes or power failures, whil
 |---|---|---|---|---|
 | `-cram` | `--cache-ram N` | `LLAMA_ARG_CACHE_RAM` | `8192` | Host RAM quota in MiB (`-1` = unlimited, `0` = direct NVMe spill). |
 | `-cdisk`| `--cache-disk N` | `LLAMA_ARG_CACHE_DISK` | `0` | Global NVMe SSD quota in MiB (`-1` = unlimited, `0` = disabled). Enables persistent `.ckpt` storage and boot-time hydration across server restarts. |
-| — | `--cache-disk-dir PATH`| `LLAMA_ARG_CACHE_DISK_DIR` | `~/.cache/beellama.cpp/radix` | Root directory path for disk `.ckpt` files. Automatically isolates models and rehydrates prefix trees at boot. |
+| — | `--cache-disk-dir PATH`| `LLAMA_ARG_CACHE_DISK_DIR` | `~/.cache/triellama.cpp/radix` | Root directory path for disk `.ckpt` files. Automatically isolates models and rehydrates prefix trees at boot. |
 
 ---
 
@@ -229,8 +229,8 @@ srv  prompt_load: slot 1 restored cold chunk from disk (n_tokens = 16384, source
 
 ### Prometheus Metrics
 When Prometheus metrics are enabled (`--metrics`), RXC exports:
-- `beellama_radix_hits_total{tier="vram"}`: Direct slot prefix reuses.
-- `beellama_radix_hits_total{tier="ram"}`: Checkpoints restored from Host RAM.
-- `beellama_radix_hits_total{tier="disk"}`: Checkpoints restored from NVMe SSD.
-- `beellama_radix_ram_bytes`: Active RAM memory usage of the Radix Tree.
-- `beellama_radix_disk_bytes`: Active disk storage used by `.ckpt` files.
+- `triellama_radix_hits_total{tier="vram"}`: Direct slot prefix reuses.
+- `triellama_radix_hits_total{tier="ram"}`: Checkpoints restored from Host RAM.
+- `triellama_radix_hits_total{tier="disk"}`: Checkpoints restored from NVMe SSD.
+- `triellama_radix_ram_bytes`: Active RAM memory usage of the Radix Tree.
+- `triellama_radix_disk_bytes`: Active disk storage used by `.ckpt` files.

@@ -118,7 +118,7 @@ if ($AllTests) {
 }
 
 Write-Host "========================================"
-Write-Host "BeeLlama.cpp Windows Vulkan Build"
+Write-Host "TrieLlama.cpp Windows Vulkan Build"
 Write-Host "SDK:     $vulkanSdk"
 Write-Host "Build:   $buildDir"
 Write-Host "Package: $(if ($Package) { $pkgDir } else { 'disabled (use -Package to enable)' })"

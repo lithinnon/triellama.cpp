@@ -1,6 +1,6 @@
-# BeeLlama.cpp text completion
+# TrieLlama.cpp text completion
 
-This example program runs text generation with BeeLlama's upstream-compatible inference engine. It supports local GGUF models, interactive prompts, reverse prompts, and the same CPU and accelerator backends as the rest of the project.
+This example program runs text generation with TrieLlama's upstream-compatible inference engine. It supports local GGUF models, interactive prompts, reverse prompts, and the same CPU and accelerator backends as the rest of the project.
 
 ## Table of Contents
 

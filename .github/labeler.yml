@@ -10,7 +10,6 @@ SYCL:
         - any-glob-to-any-file:
             - ggml/include/ggml-sycl.h
             - ggml/src/ggml-sycl/**
-            - docs/backend/SYCL.md
             - examples/sycl/**
 CUDA:
     - changed-files:
@@ -117,13 +116,11 @@ Ascend NPU:
         - any-glob-to-any-file:
             - ggml/include/ggml-cann.h
             - ggml/src/ggml-cann/**
-            - docs/backend/CANN.md
 OpenCL:
     - changed-files:
         - any-glob-to-any-file:
             - ggml/include/ggml-opencl.h
             - ggml/src/ggml-opencl/**
-            - docs/backend/OPENCL.md
 Hexagon:
     - changed-files:
         - any-glob-to-any-file:
@@ -139,4 +136,3 @@ OpenVINO:
         - any-glob-to-any-file:
             - ggml/include/ggml-openvino.h
             - ggml/src/ggml-openvino/**
-            - docs/backend/OPENVINO.md

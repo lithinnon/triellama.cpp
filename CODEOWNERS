@@ -1,12 +1,13 @@
-# This is the CODEOWNERS file for BeeLlama.cpp (Anbeeld's fork of llama.cpp).
+# This is the CODEOWNERS file for TrieLlama.cpp (lithinnon's fork of BeeLlama.cpp / llama.cpp).
 #
 # Upstream ggml-org team references are retained for paths that track
-# upstream closely. Fork-specific paths are marked with BeeLlama owners.
+# upstream closely. Fork-specific paths are marked with TrieLlama owners.
 #
-# BeeLlama-specific areas:
-#   - KVarN target KV cache and CUDA/Vulkan kernels
+# TrieLlama-specific areas:
+#   - Hierarchical Radix Prefix Caching (RXC) across VRAM, RAM, and NVMe Disk
+#   - KVarN target KV cache, precision tails, and CUDA/HIP/ROCm kernels
 #   - CUDA FlashAttention KVarN dispatch and low-bit cache support
-#   - Profit-only adaptive DFlash depth and reasoning loop guard
+#   - Speculative decoding controllers, profit-only DFlash, and reasoning loop guard
 
 # Upstream ggml-org references (retained for paths tracking upstream)
 #
@@ -26,7 +27,6 @@
 # ggml-org/llama-server     : ggerganov, ngxson, allozaur, angt, ServeurpersoCom
 # ggml-org/llama-ui           : allozaur
 
-/.devops/*.Dockerfile                   @ngxson
 /.github/actions/                       @ggml-org/ci
 /.github/workflows/                     @ggml-org/ci
 /ci/                                    @ggerganov
@@ -37,7 +37,6 @@
 /common/ngram-map.*                     @srogmann
 /conversion/                            @CISC
 /convert_*.py                           @CISC
-/docs/backend/snapdragon/               @ggml-org/ggml-hexagon
 /examples/batched.swift/                @ggerganov
 /examples/batched/                      @ggerganov
 /examples/convert-llama2c-to-ggml/      @ggerganov
@@ -130,23 +129,29 @@
 /build-xcframework.sh                   @danbev
 requirements*.txt                       @CISC
 
-# BeeLlama overrides must follow the broad upstream patterns above.
-/src/llama-kvarn.*                       @Anbeeld
-/src/llama-kv-cache-kvarn.*              @Anbeeld
-/src/llama-kv-cache-iswa.*               @Anbeeld
-/src/llama-memory-hybrid-iswa.*          @Anbeeld
-/ggml/src/ggml-cuda/kvarn.*              @Anbeeld
-/ggml/src/ggml-cuda/fattn-kvarn-dispatch.* @Anbeeld
-/ggml/src/ggml-cuda/fattn-mma-kvarn-*    @Anbeeld
-/tools/server/server-adaptive-dm.h       @Anbeeld
-/tools/server/server-loop-guard.*        @Anbeeld
-/tools/server/server-context.cpp         @Anbeeld
-/docs/beellama-features.md               @Anbeeld
-/docs/beellama-args.md                   @Anbeeld
-/docs/preset.md                          @Anbeeld
-/tests/test-kvarn.cpp                    @Anbeeld
-/tests/test-adaptive-dm.cpp              @Anbeeld
-/tests/test-server-loop-guard.cpp        @Anbeeld
-/README.md                               @Anbeeld
-/CONTRIBUTING.md                         @Anbeeld
-/SECURITY.md                             @Anbeeld
+# TrieLlama overrides must follow the broad upstream patterns above.
+/tools/server/server-radix-tree.*          @lithinnon
+/tools/server/server-tier-manager.*        @lithinnon
+/tools/server/server-task.*                @lithinnon
+/tools/server/server-context.cpp           @lithinnon
+/src/llama-kvarn.*                         @lithinnon
+/src/llama-kv-cache-kvarn.*                @lithinnon
+/src/llama-kv-cache-iswa.*                 @lithinnon
+/src/llama-memory-hybrid-iswa.*            @lithinnon
+/ggml/src/ggml-cuda/kvarn.*                @lithinnon
+/ggml/src/ggml-cuda/fattn-kvarn-dispatch.* @lithinnon
+/ggml/src/ggml-cuda/fattn-mma-kvarn-*      @lithinnon
+/tools/server/server-adaptive-dm.h         @lithinnon
+/tools/server/server-loop-guard.*          @lithinnon
+/docs/triellama-features.md                @lithinnon
+/docs/triellama-args.md                    @lithinnon
+/docs/radix-cache-walkthrough.md           @lithinnon
+/docs/preset.md                            @lithinnon
+/tests/test-radix-tree.cpp                 @lithinnon
+/tests/test-server-prompt-checkpoint.cpp   @lithinnon
+/tests/test-kvarn.cpp                      @lithinnon
+/tests/test-adaptive-dm.cpp                @lithinnon
+/tests/test-server-loop-guard.cpp          @lithinnon
+/README.md                                 @lithinnon
+/CONTRIBUTING.md                           @lithinnon
+/SECURITY.md                               @lithinnon

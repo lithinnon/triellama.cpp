@@ -199,7 +199,7 @@ extern "C" {
 
     LLAMA_API const char * llama_flash_attn_type_name(enum llama_flash_attn_type flash_attn_type);
 
-    // Experimental BeeLlama structured K/V cache.  Unlike a conventional
+    // Experimental TrieLlama structured K/V cache.  Unlike a conventional
     // ggml cache type, KVarN stores joint 128-token tiles and therefore has a
     // separate context parameter object.
     enum llama_kvarn_type {

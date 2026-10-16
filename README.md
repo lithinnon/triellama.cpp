@@ -1,145 +1,124 @@
-# Anbeeld's BeeLlama.cpp
+# TrieLlama.cpp
 
-![BeeLlama.cpp logo](beellama.jpg)
+**TrieLlama.cpp** (or just **TrieLlama**) brings native **Hierarchical Radix Prefix Caching (RXC)** across GPU VRAM, System RAM, and NVMe SSD to `llama.cpp`.
 
-BeeLlama.cpp (or just Bee) is a performance-focused llama.cpp fork for squeezing more speed and context out of local GGUF inference. It adds variance-normalized KV-cache quantization (KVarN), KV cache precision tail for recent tokens, low-bit cache types, adaptive draft control for speculative decoding, reasoning-loop protection, and more.
+By replacing flat linear prompt caches with a high-performance token-level prefix trie, TrieLlama enables instant prompt prefix sharing across slots, zero-RAM NVMe disk offloading, cross-restart cache persistence, and strict LRU disk quota management.
 
-> Not quite a pegasus, but close enough.
+> **Acknowledgments & Lineage:** TrieLlama is built upon [Anbeeld's BeeLlama.cpp](https://github.com/Anbeeld/beellama.cpp) and [Georgi Gerganov's llama.cpp](https://github.com/ggml-org/llama.cpp). We gratefully acknowledge Anbeeld's foundational contributions in KVarN quantization, precision tails, and speculative decoding. Please consider supporting Anbeeld's independent research:
 
-[![Support my work!](https://anbeeld.com/images/support.jpg)](https://anbeeld.com/support)
+[![Support Anbeeld's work!](https://anbeeld.com/images/support.jpg)](https://anbeeld.com/support)
 
-## Fork Features
+---
 
-- **Variance-normalized KV-cache quantization (KVarN)**: provides higher precision at similar memory costs. Independent K and V bit widths at `kvarn2`, `kvarn3`, `kvarn4`, `kvarn5`, `kvarn6`, and `kvarn8`, set with `--cache-type-k` and `--cache-type-v`. Supports 64-, 128-, 256-, and 512-dimensional K/V heads.
-- **KV cache precision tail**: keep most of the KV cache quantized while storing recent tokens in F16/BF16, enabled with `--kv-tail-tokens`. A single global softmax merges the quantized body and the precision tail under FlashAttention, without materializing the whole cache.
-- **Standard low-bit KV cache types**: `q2_0`, `q2_1`, `q3_0`, `q3_1`, `q6_0`, and `q6_1`, usable for either target or draft caches alongside the upstream `q4`/`q5`/`q8` types.
-- **KVarN for speculative decoding**: compress supported owned MTP, DFlash, EAGLE3, and non-MLA DSpark caches independently of the target with `--spec-draft-type-k` and `--spec-draft-type-v`.
-- **Independent draft micro-batch sizing**: MTP, DFlash, and other drafters get their own batch size setting, `-ubd`, which defaults to 128. This saves gigabytes of memory (especially with DFlash) with little to no performance loss.
-- **Adaptive draft-max for DFlash**: adjusts the active draft horizon at runtime instead of using a fixed `--spec-draft-n-max`, comparing speculative throughput against a no-spec baseline.
-- **Reasoning-loop protection**: the server detects repeated hidden reasoning and visible output, forcing reasoning to close or stopping generation when a loop triggers.
-- **Reworked KV cache and prompt reuse**: transactional state restore, capability-aware speculative rollback, and reusable RAM snapshots. Cached prompts are selected by their safely restorable prefix.
+## Flagship Feature: Hierarchical Radix Prefix Caching (RXC)
 
-For the full feature and public-repo comparison, read [docs/beellama-features.md](docs/beellama-features.md). For the complete argument reference, read [docs/beellama-args.md](docs/beellama-args.md).
+Standard `llama.cpp` stores cached prompt states in a flat list, requiring an $O(N \cdot L)$ scan across all cached sequences to find the longest common prefix. Under concurrent multi-turn chat sessions or repeated system prompts, this leads to heavy redundant KV-cache compute, search latency, and high VRAM pressure.
 
-## KV Cache Quantization
+**TrieLlama's Radix Prefix Cache (RXC)** structures cached states into a token-level **Radix Tree** (compressed prefix trie):
 
-K and V cache types are set independently with `--cache-type-k` and `--cache-type-v`. The research is covered in articles: [KVarN KV Cache: Implementation and Benchmarks](https://anbeeld.com/articles/kvarn-kv-cache-implementation-and-benchmarks), [KV Cache Precision Tail: Implementation and Benchmarks](https://anbeeld.com/articles/kv-cache-precision-tail-implementation-and-benchmarks), and [KV Cache Quantization Benchmarks: KVarN, Precision Tail](https://anbeeld.com/articles/kv-cache-quantization-benchmarks-kvarn-precision-tail).
+```
+                   [ Root Node ]
+                         |
+                 "System Prompt..." (Edge: 256 tokens)
+                         |
+                  [ Branch Node 1 ]
+                 /                 \
+     "User 1: ..."                  "User 2: ..."
+     (Edge: 128 tok)                (Edge: 128 tok)
+           |                              |
+    [ Checkpoint A ]               [ Checkpoint B ]
+    (Turn 1 KV State)              (Turn 1 KV State)
+           |                              |
+    "Assistant 1: ..."             "Assistant 2: ..."
+```
 
-### KV Cache Recommenation Ladder
+Prefix lookup runs in $O(L)$ time (proportional only to the prompt length), completely decoupled from the number of active conversation branches.
 
-The measurements come from Qwen 3.6 27B Q5_K_S at 64K context on Wikitext-2 raw with `-b 2048 -ub 512` on an RTX 3090. Median KLD is the primary quality metric; lower is better.
+### 3-Tier Storage Hierarchy
 
-| K / V | Tail | Size | Size vs bf16 | Median KLD | 99.9% KLD | What it is for |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `bf16 / bf16` | 0 | 4096 MiB | 100.0% | 0 | 0.000050 | Reference |
-| `q8_0 / q8_0` | 1024 | 2272 MiB | 55.5% | 0.000897 | 0.087699 | Standard fidelity with a precision tail |
-| `kvarn8 / kvarn8` | 1024 | 2256 MiB | 55.1% | 0.000871 | 0.087639 | Best measured quality below BF16 |
-| `q8_0 / q8_0` | 0 | 2176 MiB | 53.1% | 0.000909 | 0.093029 | Standard fidelity |
-| `q8_0 / q6_0` | 1024 | 2016 MiB | 49.2% | 0.000894 | 0.091098 | q8_0 quality within noise, 256 MiB less |
-| `kvarn6 / kvarn6` | 1024 | 1744 MiB | 42.6% | 0.000879 | 0.084629 | High-end value pick |
-| `kvarn6 / kvarn5` | 1024 | 1616 MiB | 39.5% | 0.000886 | 0.092778 | Much cheaper, almost as good |
-| `kvarn5 / kvarn5` | 1024 | 1488 MiB | 36.3% | 0.000897 | 0.087666 | Highest value in the mid-range |
-| `q5_0 / q4_1` | 1024 | 1440 MiB | 35.2% | 0.000966 | 0.089128 | Standard option when VRAM-constrained |
-| `kvarn5 / kvarn4` | 1024 | 1360 MiB | 33.2% | 0.000936 | 0.089469 | Balanced default |
-| `q4_0 / q4_0` | 1024 | 1248 MiB | 30.5% | 0.001057 | 0.104486 | Compact standard cache |
-| `kvarn4 / kvarn4` | 1024 | 1232 MiB | 30.1% | 0.000994 | 0.090391 | Cleaner than q4_0 for less memory |
-| `kvarn4 / kvarn3` | 1024 | 1104 MiB | 27.0% | 0.001112 | 0.113968 | Smallest recommended tier |
-| `kvarn3 / kvarn3` | 1024 | 976 MiB | 23.8% | 0.001316 | 0.139558 | When the context must fit |
-| `kvarn3 / kvarn2` | 1024 | 848 MiB | 20.7% | 0.002424 | 0.238780 | Emergency compression |
-| `kvarn2 / kvarn2` | 1024 | 720 MiB | 17.6% | 0.003811 | 0.450496 | Last resort |
+RXC decouples KV-cache capacity from physical GPU memory by managing a 3-tier hierarchy:
 
-A 1024-token tail is a useful starting point for low-bit Qwen caches. Prefer more body precision when old and recent tokens matter equally; consider 2048 only when the newest two thousand tokens are genuinely the privileged working set. Standard caches generally have slightly faster prefill.
+```
++-------------------------------------------------------------------------+
+| Tier 1: GPU VRAM (Active Contexts)                                      |
+|  - Zero-latency attention compute directly on device                    |
+|  - Managed via model context slots                                      |
++------------------------------------+------------------------------------+
+                                     | (Evict / Restore on Turn Completion)
+                                     v
++-------------------------------------------------------------------------+
+| Tier 2: Host System RAM (Staged Prefixes)                               |
+|  - High-speed DRAM buffering for warm conversation branches             |
+|  - Governed by `--cache-ram` (`-cram`) token limit                      |
++------------------------------------+------------------------------------+
+                                     | (Demote / Hydrate on Demand)
+                                     v
++-------------------------------------------------------------------------+
+| Tier 3: Persistent NVMe / SSD Disk (Cold Checkpoints)                   |
+|  - Multi-gigabyte persistent cache surviving server restarts            |
+|  - Managed via `--cache-disk-dir` with LRU quota scavenging             |
++-------------------------------------------------------------------------+
+```
 
-Gemma 4 needs a separate decision. Its 1024-token sliding window makes a 1024 tail exact across most layers, sharply changing memory and throughput. Standard `q8_0 / q8_0` without a tail is the safer Gemma default when throughput and older-context coverage matter, and the benchmark results recommend avoiding quantized KV cache when Gemma quality is non-negotiable.
+### Key Capabilities
 
-### Standard-Only KV Cache Ladder
+- **Instant Multi-Branch Prefix Sharing:** Independent slots and requests sharing common system prompts, document chunks, or conversation histories reuse existing KV states immediately without prefill delay.
+- **Cross-Restart Disk Persistence:** Valid prefix nodes are indexed and persisted under `--cache-disk-dir`. When the server is restarted, cold checkpoints are immediately hydrated into the trie, eliminating cold-start prefill on subsequent sessions.
+- **Zero-RAM Offload Mode (`-cram 0`):** In memory-constrained environments or dedicated GPU nodes, set `-cram 0` to stream inactive KV states directly between GPU VRAM and NVMe SSD, keeping host RAM consumption strictly minimal.
+- **Global Disk Quota & LRU Scavenging (`--cache-disk-max-bytes`):** Enforces a strict upper bound on disk usage. When storage exceeds the limit, the background scavenger prunes the oldest unpinned leaf branches to prevent unbounded disk usage.
+- **KV-Tail & KVarN Invariant Preservation:** Fully compatible with KVarN 128-token chunk boundaries (`KVAR_N_GROUP = 128`) and preserves homogeneous F16/BF16 precision tails across transactional restores.
+- **Multimodal Prefix Caching:** Indexes and caches multimodal vision and audio embedding prefixes alongside text tokens.
 
-Use this generic fallback ladder when KVarN or precision tails are unavailable. It is based on the same Qwen 3.6 27B benchmark, with every standard cache row using tail 0.
+For an in-depth architectural guide and benchmark details, see the [Radix Cache Walkthrough](docs/radix-cache-walkthrough.md).
 
-| K / V | Size | Size vs bf16 | Median KLD | 99.9% KLD | What it is for |
-| --- | ---: | ---: | ---: | ---: | --- |
-| `bf16 / bf16` | 4096 MiB | 100.0% | 0 | 0.000050 | Reference |
-| `q8_0 / q8_0` | 2176 MiB | 53.1% | 0.000909 | 0.093029 | Compression with minimal losses |
-| `q8_0 / q6_0` | 1920 MiB | 46.9% | 0.000937 | 0.093575 | 256 MiB below q8_0 |
-| `q6_0 / q6_0` | 1664 MiB | 40.6% | 0.000960 | 0.091134 | High-end value pick |
-| `q6_0 / q5_0` | 1536 MiB | 37.5% | 0.001054 | 0.094670 | Balanced default |
-| `q5_0 / q5_0` | 1408 MiB | 34.4% | 0.001154 | 0.097070 | Last tier before the cliff |
-| `q5_0 / q4_1` | 1344 MiB | 32.8% | 0.001433 | 0.122096 | Default when VRAM-constrained |
-| `q5_0 / q4_0` | 1280 MiB | 31.3% | 0.001516 | 0.121068 | 64 MiB cheaper, worse median |
-| `q4_0 / q4_0` | 1152 MiB | 28.1% | 0.001846 | 0.154408 | Smallest recommended tier |
-| `q4_0 / q3_0` | 1024 MiB | 25.0% | 0.003313 | 0.218912 | When the context must fit |
-| `q3_0 / q3_0` | 896 MiB | 21.9% | 0.004696 | 0.304186 | Emergency compression |
-| `q2_0 / q2_0` | 640 MiB | 15.6% | 0.019374 | 1.198902 | Last resort |
+---
 
-### KV Cache Type Reference
+## Quick Start: Radix Caching
 
-<details>
-<summary><strong>All KV cache types available in BeeLlama</strong></summary>
+Launch `llama-server` with hierarchical radix caching enabled:
 
-| Type | Origin | bpv | Size vs bf16 |
-| --- | --- | ---: | ---: |
-| `q8_0` | upstream | 8.5 | 53.1% |
-| `kvarn8` | Huawei / fork | 8.375 | 52.3% |
-| `q6_1` | fork | 7.0 | 43.8% |
-| `q6_0` | fork | 6.5 | 40.6% |
-| `kvarn6` | Huawei / fork | 6.375 | 39.8% |
-| `q5_1` | upstream | 6.0 | 37.5% |
-| `q5_0` | upstream | 5.5 | 34.4% |
-| `kvarn5` | Huawei / fork | 5.375 | 33.6% |
-| `q4_1` | upstream | 5.0 | 31.3% |
-| `q4_0` | upstream | 4.5 | 28.1% |
-| `iq4_nl` | upstream | 4.5 | 28.1% |
-| `kvarn4` | Huawei / fork | 4.375 | 27.3% |
-| `q3_1` | fork | 4.0 | 25.0% |
-| `q3_0` | fork | 3.5 | 21.9% |
-| `kvarn3` | Huawei / fork | 3.375 | 21.1% |
-| `q2_1` | fork | 3.0 | 18.8% |
-| `q2_0` | fork | 2.5 | 15.6% |
-| `kvarn2` | Huawei / fork | 2.375 | 14.8% |
+```bash
+# Launch server with persistent NVMe caching and zero-RAM mode
+llama-server \
+  -m /path/to/model.gguf \
+  --port 8080 \
+  -c 32768 -np 4 \
+  --cache-disk-dir ~/.cache/triellama.cpp/radix \
+  --cache-disk-max-bytes 64GB \
+  -cram 0
+```
 
-Standard ratios come directly from each block format. KVarN ratios describe the compressed record body, including scale and zero-point metadata; the permanent exact sink, exact suffix, staging, and alignment add overhead.
+### Key Radix Arguments
 
-</details>
-
-## Installation
-
-### Prebuilt
-
-Current release binaries are on the [releases page](https://github.com/Anbeeld/beellama.cpp/releases).
-
-| Platform | Backend | Asset suffix |
+| Flag | Default | Description |
 | --- | --- | --- |
-| macOS arm64 | Metal | `bin-macos-arm64.tar.gz` |
-| Ubuntu x64 | CPU | `bin-ubuntu-x64.tar.gz` |
-| Ubuntu arm64 | CPU | `bin-ubuntu-arm64.tar.gz` |
-| Ubuntu x64 | CUDA 12.4 | `bin-ubuntu-cuda-12.4-x64.tar.gz` |
-| Ubuntu x64 | CUDA 13.3 | `bin-ubuntu-cuda-13.3-x64.tar.gz` |
-| Ubuntu x64 | Vulkan | `bin-ubuntu-vulkan-x64.tar.gz` |
-| Ubuntu x64 | ROCm 7.2 | `bin-ubuntu-rocm-7.2-x64.tar.gz` |
-| Ubuntu x64 | SYCL | `bin-ubuntu-sycl-x64.tar.gz` |
-| Windows x64 | CPU | `bin-win-cpu-x64.zip` |
-| Windows x64 | Vulkan | `bin-win-vulkan-x64.zip` |
-| Windows x64 | SYCL | `bin-win-sycl-x64.zip` |
-| Windows x64 | CUDA 12.4 | `bin-win-cuda-12.4-x64.zip` |
-| Windows x64 | CUDA 13.3 | `bin-win-cuda-13.3-x64.zip` |
-| Windows x64 | HIP/Radeon | `bin-win-hip-radeon-x64.zip` |
+| `--cache-disk-dir PATH` | `${XDG_CACHE_HOME:-~/.cache}/triellama.cpp/radix` | Directory where persistent KV checkpoints and trie metadata are stored. |
+| `--cache-disk-max-bytes BYTES` | `0` (unlimited) | Global disk storage limit (supports suffixes like `32GB`, `500MB`). Triggers LRU eviction when exceeded. |
+| `-cram, --cache-ram N` | `40960` | Maximum tokens kept in Host System RAM. Set to `0` for zero-RAM direct-to-disk offload. |
+| `--checkpoint-min-step N` | `128` | Minimum token interval between turn checkpoints. |
 
-Windows CUDA archives contain a `ggml-cuda.dll` backend; download the matching `beellama-<version>-cudart-win-cuda-*-x64.zip` runtime archive and extract it into the same folder. Windows SYCL and HIP archives ship as standalone packages with all required runtime DLLs bundled.
+---
 
-Docker images are published to `ghcr.io/anbeeld/beellama.cpp`:
+## Inherited & Experimental Features
 
-| Image | Acceleration | Platforms |
-| --- | --- | --- |
-| `server`, `server-cpu` | CPU | linux/amd64, linux/arm64 |
-| `server-cuda`, `server-cuda12` | CUDA 12.4 | linux/amd64 |
-| `server-cuda13` | CUDA 13.3 | linux/amd64 |
-| `server-rocm` | ROCm | linux/amd64 |
-| `server-vulkan` | Vulkan | linux/amd64 |
-| `server-sycl` | SYCL | linux/amd64 |
+TrieLlama inherits the core performance features introduced by Anbeeld in BeeLlama, along with custom experimental additions:
 
-Building from source with `-DGGML_NATIVE=ON` *may* result in a *tiny* bit better performance, so it might still be a good idea to do that if/when you decide to use this fork long-term.
+- **Variance-Normalized KV-Cache Quantization (KVarN):** Calibration-free 2- to 8-bit KV-cache quantization (`kvarn2`..`kvarn8`) for high-fidelity compression.
+- **KV Cache Precision Tail:** Keeps historical tokens quantized while retaining the newest tokens in exact F16/BF16 (`--kv-tail-tokens`).
+- **Standard Low-Bit KV Formats:** Extends upstream cache types with `q2_0`, `q2_1`, `q3_0`, `q3_1`, `q6_0`, and `q6_1`.
+- **Adaptive DFlash Speculative Decoding:** Dynamic speculative draft-horizon controller (`--spec-dm-controller profit`).
+- **Reasoning-Loop Protection:** Prevents infinite generation loops in reasoning models (`--reasoning-loop-guard`).
+- **Experimental SNC Quantization (`snc4` / `snc8`):** A lightweight, norm-calibrated KV cache quantization format crafted for local hardware experimentation. It is strictly an experimental, vibe-engineered heuristic to satisfy personal rig constraints—use KVarN or standard `q8_0`/`q4_0` if you need benchmark-verified fidelity.
 
-### CUDA Build
+> For full technical write-ups, mathematical derivations, Wikitext benchmark ladders, and preset formats for inherited features, please refer to the original **[BeeLlama.cpp repository](https://github.com/Anbeeld/beellama.cpp)** and our local [TrieLlama Features Matrix](docs/triellama-features.md).
+
+---
+
+## Build from Source
+
+TrieLlama focuses development, optimization, and testing strictly on **CUDA**, **ROCm/HIP**, and **CPU** backends:
+
+### CUDA Build (Linux / Windows)
 
 ```bash
 # Linux (GCC + CUDA)
@@ -153,114 +132,50 @@ cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON ^
   -DGGML_CUDA_FA=ON ^
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
+```
 
-# macOS (Metal)
-cmake -B build -DGGML_METAL=ON -DCMAKE_BUILD_TYPE=Release
+### ROCm / HIP Build (AMD Radeon & Strix Halo APUs)
+
+```bash
+cmake -B build -DGGML_HIP=ON -DGGML_NATIVE=ON \
+  -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-The default CUDA FlashAttention build covers 50 standard cache pairs and 15 KVarN fast-decode pairs, including the homogeneous F16 and BF16 pairs needed by precision tails. Add `-DGGML_CUDA_FA_ALL_QUANTS=ON` to compile all 169 standard and 36 KVarN pairs, or `-DGGML_CUDA_KVARN=OFF` to build without KVarN kernels.
+### CPU Build
 
-### Other Backends
-
-Bee inherits llama.cpp backend support, including Metal, HIP, Vulkan, SYCL, BLAS, CANN, MUSA, OpenVINO, OpenCL, and RPC. Use the upstream-style build docs in [docs/build.md](docs/build.md) and backend-specific pages under [docs/backend](docs/backend).
-
-## Common Commands
-
-### Local CLI
-
-```sh
-llama-cli -m model.gguf
-llama-cli -m model.gguf -cnv --chat-template chatml
-llama-cli -m model.gguf -n 256 --grammar-file grammars/json.gbnf -p "Request: schedule a call at 8pm; Command:"
+```bash
+cmake -B build -DGGML_NATIVE=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 ```
 
-### OpenAI-Compatible Server
-
-```sh
-llama-server -m model.gguf --port 8080
-llama-server -m model.gguf -c 16384 -np 4
-llama-server -m model.gguf -md draft.gguf
-```
-
-### DFlash Speculative Decoding
-
-```sh
-llama-server -m target.gguf --spec-type draft-dflash \
-  --spec-draft-model drafter.gguf \
-  --spec-draft-ngl all \
-  --spec-dm-controller profit \
-  --flash-attn on --cache-type-k q5_0 --cache-type-v q4_1
-```
-
-DFlash1, DFlash2, and non-MLA DSpark can use an owned draft KVarN cache with
-`--spec-draft-type-k/v kvarnN`. On capable CUDA devices, supported DFlash1/DFlash2
-non-causal block attention consumes compressed KVarN records directly; unsupported
-shapes and backends materialize the body. Multi-stream SWA draft caches retain
-the materialized route; non-MLA DSpark stays materialized.
-
-### KVarN Target Cache
-
-```sh
-# Balanced general starting point from the benchmark ladder
-llama-server -m model.gguf --flash-attn on \
-  --cache-type-k kvarn5 --cache-type-v kvarn4 \
-  --kv-tail-tokens 1024
-```
-
-### KVarN Draft Cache
-
-Model-backed speculative modes with an owned cache—draft-simple, EAGLE3,
-audited Qwen MTP, DFlash1/DFlash2, and non-MLA DSpark—can select an independent
-KVarN draft cache:
-
-```sh
-llama-server -m target.gguf --spec-type draft-dflash \
-  --spec-draft-model dflash.gguf \
-  --spec-draft-type-k kvarn4 --spec-draft-type-v kvarn2
-```
-
-The target and draft cache types are independent. A one-sided draft KVarN
-selection promotes the other side to the same width with a warning. There is no
-draft precision-tail option: the explicit draft tail request stays zero and
-KVarN retains its intrinsic exact suffix of up to 128 tokens. The same draft
-K/V pair applies to full-attention and SWA sub-caches. Gemma 4 MTP shares the
-target cache, so configure target `--cache-type-k/v kvarn*` instead of a draft
-cache type. Unclassified or shared-cache MTP architectures reject explicit
-draft KVarN requests.
-
-### Router Mode With Presets
-
-```sh
-llama-server --models-dir /path/to/models
-llama-server --models-preset presets.ini
-```
+---
 
 ## Documentation
 
-- [BeeLlama features and public repo diff](docs/beellama-features.md)
-- [BeeLlama args reference](docs/beellama-args.md)
-- [Build docs](docs/build.md)
-- [Server docs](tools/server/README.md)
-- [Docker docs](docs/docker.md)
-- [Performance troubleshooting](docs/development/token_generation_performance_tips.md)
+- [Hierarchical Radix Cache Walkthrough](docs/radix-cache-walkthrough.md) — Architectural design, eviction policies, and benchmarks
+- [TrieLlama Features Matrix](docs/triellama-features.md) — Detailed feature list and upstream diff
+- [Argument Reference](docs/triellama-args.md) — Comprehensive CLI flag reference
+- [Speculative Decoding](docs/speculative.md) — Speculative decoding options and controllers
+- [HTTP Server Documentation](tools/server/README.md) — REST API endpoints, slots, and web UI
+- [Performance Troubleshooting](docs/development/token_generation_performance_tips.md) — Optimization guide
 
 ## Contributing
 
-Keep PRs small and scoped. Run the narrowest relevant tests or benchmarks before opening a PR, and include the exact commands. For fork-specific changes, update the corresponding docs when behavior or args change.
+Keep PRs small and scoped. Run relevant tests before opening a PR against `lithinnon/triellama.cpp`:
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for inherited llama.cpp contribution conventions and this fork's AI usage policy.
+```bash
+./build/bin/test-radix-tree
+./build/bin/test-arg-parser
+python3 tests/test-upstream-merge-keepers-static.py
+```
 
-## Dependencies
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) for contribution guidelines, AI usage policies, and private security disclosures.
 
-- [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) - HTTP client/server library used by `llama-server` - MIT
-- [stb-image](https://github.com/nothings/stb) - single-header image decoder used by multimodal code - public domain
-- [nlohmann/json](https://github.com/nlohmann/json) - single-header JSON library - MIT
-- [miniaudio.h](https://github.com/mackron/miniaudio) - single-header audio decoder - public domain
-- [subprocess.h](https://github.com/sheredom/subprocess.h) - process launching helper - public domain
-- [Intel OpenVINO](https://github.com/openvinotoolkit/openvino) - frontend header used in OpenVINO backend (`ggml/src/ggml-openvino/openvino/frontend.h`) - Apache-2.0
-- Intel SYCL/oneAPI - SYCL backend (`ggml/src/ggml-sycl/`) - Apache-2.0 WITH LLVM-exception
+## License & Credits
 
-See the `licenses/` directory for full license texts.
+TrieLlama is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
-[![Support my work!](https://anbeeld.com/images/support.jpg)](https://anbeeld.com/support)
+- Built upon [llama.cpp](https://github.com/ggml-org/llama.cpp) by Georgi Gerganov and the `ggml-org` team.
+- Built upon [BeeLlama.cpp](https://github.com/Anbeeld/beellama.cpp) by Anbeeld.

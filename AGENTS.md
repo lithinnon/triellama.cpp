@@ -1,23 +1,33 @@
 # AGENTS.md
 
-This file gives code assistants local context for BeeLlama.cpp. The local tree is
+This file gives code assistants local context for TrieLlama.cpp. The local tree is
 the source of truth for behavior; use `tmp/upstream-llama.cpp` only as the
 architectural reference when rebasing fork features.
 
 ## What This Is
 
-BeeLlama.cpp is Anbeeld's llama.cpp fork. The v0.4.0 fork surface is intentionally
-small:
+TrieLlama.cpp (`triellama.cpp`) is lithinnon's high-performance llama.cpp fork,
+built upon Anbeeld's BeeLlama.cpp foundation and Georgi Gerganov's ggml-org architecture.
+The fork surface centers around **Hierarchical Radix Prefix Caching (RXC)**, KVarN
+quantization, speculative decoding, and dedicated hardware acceleration strictly
+tracking **CUDA**, **ROCm/HIP**, and **CPU**:
 
+- **Hierarchical Radix Prefix Caching (RXC)**: Trie-based multi-tier KV-cache reuse
+  across GPU VRAM, Host RAM, and persistent NVMe SSD storage (`tools/server/server-radix-tree.*`,
+  `tools/server/server-tier-manager.*`). Includes zero-RAM disk offload (`-cram 0`),
+  automatic LRU disk scavenging with configurable quotas (`--cache-disk-max-bytes`),
+  multimodal prefix support, and turn-based checkpoints.
 - Upstream speculative decoding, including `draft-dflash`, `draft-mtp`,
   EAGLE3, and n-gram modes.
 - KVarN KV-cache compression for target contexts and model-backed speculative
   contexts with owned draft K/V caches, selected with
   `kvarn2`, `kvarn3`, `kvarn4`, `kvarn5`, `kvarn6`, or `kvarn8`.
 - Standard low-bit KV cache formats `q2_0`, `q2_1`, `q3_0`, `q3_1`,
-  `q6_0`, and `q6_1`. Bee's cache-facing `q2_0` uses the internal enum
+  `q6_0`, and `q6_1`. Cache-facing `q2_0` uses the internal enum
   `GGML_TYPE_Q2_0S` so it cannot collide with upstream's serialized Q2_0 weight
   format.
+- Precision tail (`--kv-tail-tokens`) to retain exact recent tokens in F16/BF16
+  while compressing long histories.
 - A profit-only adaptive draft-max controller for DFlash1. DFlash2 keeps its fixed trained block limit and selector confidence.
 - Reasoning-loop detection and the opted-in realtime
   `/v1/chat/completions/control` endpoint.
@@ -41,15 +51,21 @@ cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON \
   -DGGML_CUDA_FA=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 
+# Linux ROCm / HIP (AMD)
+cmake -B build -DGGML_HIP=ON -DGGML_NATIVE=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+
+# Linux CPU
+cmake -B build -DGGML_NATIVE=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+
 # Windows MSVC + CUDA
 cmake -B build -DGGML_CUDA=ON -DGGML_NATIVE=ON ^
   -DGGML_CUDA_FA=ON -DCMAKE_CUDA_ARCHITECTURES=86 ^
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
-
-# macOS Metal
-cmake -B build -DGGML_METAL=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
 ```
 
 The default CUDA FlashAttention build contains 50 standard vector pairs and 15
@@ -64,19 +80,6 @@ matrix use descriptor-native MMA fallback.
 Use `-DCMAKE_CUDA_ARCHITECTURES=86` for RTX 3090 and `89` for RTX 4090 when
 the build host cannot detect the target GPU.
 
-On Windows hosts matching CUDA 13.3 and compute capability 8.6, prefer:
-
-```powershell
-powershell -File scripts/build-win-cuda-sm_86.ps1 -AllTests
-powershell -File scripts/build-win-cuda-sm_86-default.ps1 -AllTests
-powershell -File scripts/build-win-vulkan.ps1 -AllTests
-```
-
-The first CUDA script compiles the expanded quant matrix; the `-default`
-variant compiles the default pair matrix. The Vulkan script requires a Vulkan
-SDK. For other hardware or toolkits, adapt the architecture, toolkit, and
-build-name parameters instead of reusing the `sm_86` artifact names.
-
 Key binaries are `llama-server`, `llama-cli`, `llama-bench`, and
 `llama-perplexity` under the configured build directory's `bin` folder.
 
@@ -84,16 +87,17 @@ Key binaries are `llama-server`, `llama-cli`, `llama-bench`, and
 
 ### Main Directories
 
-- `ggml/` - tensor library, quantization, and CPU/GPU backends.
+- `ggml/` - tensor library, quantization, and CPU/GPU backends (CUDA, ROCm/HIP, CPU).
 - `src/` - model loading, contexts, graphs, and memory.
 - `src/models/` - model-specific graph builders.
 - `common/` - arguments, sampling, presets, and upstream speculative decoding.
-- `tools/server/` - HTTP API, slots, speculative scheduling, and Bee server
-  extensions.
+- `tools/server/` - HTTP API, slots, hierarchical radix cache, and server extensions.
 - `include/llama.h` - public C API.
 
 ### Fork-Specific Files
 
+- `tools/server/server-radix-tree.cpp` / `.h` - hierarchical radix prefix tree.
+- `tools/server/server-tier-manager.cpp` / `.h` - multi-tier (VRAM/RAM/Disk) cache manager and LRU quota scavenger.
 - `src/llama-kvarn.cpp` / `.h` - KVarN descriptors, presets, and validation.
 - `src/llama-kv-cache-kvarn.cpp` / `.h` - KVarN memory and state handling.
 - `ggml/src/ggml-cuda/kvarn.cu` / `.cuh` - shared CUDA/HIP KVarN store and
@@ -101,20 +105,23 @@ Key binaries are `llama-server`, `llama-cli`, `llama-bench`, and
 - `ggml/src/ggml-cuda/fattn-kvarn-dispatch.cu` and
   `fattn-kvarn-portable.cuh` - optimized CUDA and portable CUDA/HIP direct
   KVarN attention.
-- `ggml/src/ggml-vulkan/vulkan-shaders/kvarn_store.comp` and
-  `kvarn_materialize.comp`, `kvarn_wht.comp`, and `kvarn_flash_attn.comp` -
-  Vulkan KVarN storage, fallback materialization, transforms, and direct
-  attention shaders.
 - `tools/server/server-adaptive-dm.h` - profit adaptive draft-max controller.
 - `tools/server/server-loop-guard.cpp` / `.h` - reasoning loop detection.
+
 ### Key Docs
 
-- `docs/beellama-features.md` - fork feature and compatibility matrix.
-- `docs/beellama-args.md` - Bee arguments, aliases, and removals.
+- `docs/triellama-features.md` - fork feature and compatibility matrix.
+- `docs/triellama-args.md` - TrieLlama arguments, aliases, and removals.
+- `docs/radix-cache-walkthrough.md` - Hierarchical Radix Prefix Caching guide.
 - `docs/preset.md` - INI preset format.
 
 ### Invariants
 
+- **Hierarchical Radix Caching (RXC)**:
+  - Cache slots match longest matching prefix nodes in `server_radix_tree`.
+  - Cold nodes can be demoted to disk checkpoints or evicted according to LRU priority and `--cache-disk-max-bytes`.
+  - Zero-RAM offload (`-cram 0`) must never hold inactive KV checkpoints in system RAM.
+  - Prefix matching preserves exact KV-tail tokens and KVarN group boundaries (`KVAR_N_GROUP = 128`).
 - KVarN is supported for target caches and owned draft caches used by
   draft-simple, EAGLE3, audited Qwen MTP, DFlash1/DFlash2, and non-MLA DSpark.
   DSV4/MLA DSpark remains unsupported because its latent cache is not dense K/V. Shared
@@ -123,16 +130,15 @@ Key binaries are `llama-server`, `llama-cli`, `llama-bench`, and
 - CUDA DFlash1/DFlash2 non-causal KVarN attention uses direct records only for
   qualified owned dense-K/V layers and supported shapes. Unsupported shapes,
   DSpark, and unqualified backends retain materialized attention.
-- CUDA, CPU, Vulkan, and HIP/ROCm consume KVarN records directly in native
-  attention paths. Vulkan native attention requires shader Int64 and
-  buffer-device-address support. Materialization is an explicit fallback, not
+- CUDA, CPU, and HIP/ROCm consume KVarN records directly in native
+  attention paths. Materialization is an explicit fallback, not
   the normal route for these backends.
 - Unsupported KVarN placements fail closed or use the explicit
   bit-width-matched fallback path; they must not silently reinterpret records.
 - Custom CUDA helpers are resolved through
   `ggml_backend_cuda_reg_get_proc_address`.
 - DFlash scheduling, checkpoints, verification, and multi-GPU behavior belong
-  to upstream. Bee extensions must use upstream task, sampler, and checkpoint
+  to upstream. TrieLlama extensions must use upstream task, sampler, and checkpoint
   APIs rather than restoring fork-private verifier state.
 - Benchmark claims require the exact model files, command, prompt, sampling
   settings, hardware, and commit ID.

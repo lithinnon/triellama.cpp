@@ -1,4 +1,4 @@
-# BeeLlama INI presets
+# TrieLlama INI presets
 
 Presets store reusable llama.cpp arguments in an INI file. Use them with the
 router server when several models need different paths, cache policies, or
@@ -9,7 +9,7 @@ llama-server --models-preset .\models.ini
 ```
 
 The exact preset argument and preset-only defaults are listed in the
-[BeeLlama argument reference](beellama-args.md#presets).
+[TrieLlama argument reference](triellama-args.md#presets).
 
 ## File format
 
@@ -92,10 +92,10 @@ from preset serialization and public router metadata. Supply `HF_TOKEN` in the
 router environment (or `--hf-token` at startup); child model processes receive
 only the environment value, never a token-bearing argv entry.
 
-## BeeLlama migration rules
+## TrieLlama migration rules
 
 New presets must use `draft-dflash`, standard q cache names, or `kvarnN` target
 cache names. Do not carry forward TurboQuant/TCQ formats,
 `spec-dflash-cross-ctx`, tree-verifier settings, `GGML_DFLASH_*` variables, or
 `GGML_CUDA_FA_HALF_QUANTS`. The complete redirect and removal list is in
-[Migration from earlier versions](beellama-args.md#migration-from-earlier-versions).
+[Migration from earlier versions](triellama-args.md#migration-from-earlier-versions).

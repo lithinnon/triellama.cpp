@@ -1,9 +1,9 @@
-# Add a new model architecture to BeeLlama.cpp
+# Add a new model architecture to TrieLlama.cpp
 
 Adding a model requires few steps:
 
 1. Convert the model to GGUF
-2. Define the model architecture using BeeLlama's upstream-compatible conventions
+2. Define the model architecture using TrieLlama's upstream-compatible conventions
 3. Build the GGML graph implementation
 4. Optional: Add multimodal encoder implementation
 

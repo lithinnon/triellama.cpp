@@ -2,12 +2,18 @@
 #include "../tools/server/server-tier-manager.h"
 #include "../tools/server/server-task.h"
 #include "../tools/mtmd/mtmd.h"
+#include "../ggml/include/ggml.h"
+#include "../ggml/src/ggml-quants.h"
+#include "../ggml/src/ggml-common.h"
 
 #undef NDEBUG
 #include <cassert>
 #include <iostream>
 #include <vector>
 #include <filesystem>
+#include <cmath>
+#include <fstream>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
@@ -136,7 +142,7 @@ static void test_radix_tree_kvarn_alignment() {
 }
 
 static void test_tier_manager_atomic_disk_save_load() {
-    const std::string test_dir = "/tmp/beellama_radix_test_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    const std::string test_dir = "/tmp/triellama_radix_test_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 
     server_radix_tree tree;
     server_tier_manager tier_mgr;
@@ -171,7 +177,7 @@ static void test_tier_manager_atomic_disk_save_load() {
 }
 
 static void test_tier_manager_quota_eviction() {
-    const std::string test_dir = "/tmp/beellama_radix_quota_test_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    const std::string test_dir = "/tmp/triellama_radix_quota_test_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 
     server_radix_tree tree;
     server_tier_manager tier_mgr;
@@ -192,7 +198,7 @@ static void test_tier_manager_quota_eviction() {
 }
 
 static void test_radix_cache_hits_and_misses() {
-    const std::string test_dir = "/tmp/beellama_radix_hitmiss_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    const std::string test_dir = "/tmp/triellama_radix_hitmiss_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     server_prompt_cache cache(8, 0, true, 16, test_dir); // 8 MiB RAM, 16 MiB disk
 
     // 1. Insert Prompt A: [10, 20, 30, 40]
@@ -234,7 +240,7 @@ static void test_radix_cache_hits_and_misses() {
 static void test_radix_cache_quota_and_eviction_lifecycle() {
     server_radix_tree tree;
     server_tier_manager tier_mgr;
-    const std::string test_dir = "/tmp/beellama_radix_lifecycle_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    const std::string test_dir = "/tmp/triellama_radix_lifecycle_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     
     // 1 MiB disk limit
     assert(tier_mgr.init(test_dir, 1));
@@ -367,7 +373,7 @@ static void test_swa_degraded_live_slot_radix_recovery() {
 }
 
 static void test_multimodel_cache_isolation_and_quotas() {
-    std::string base_dir = "/tmp/beellama_radix_multimodel_test_" +
+    std::string base_dir = "/tmp/triellama_radix_multimodel_test_" +
                            std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count()) + "/radix";
     std::string dir_a = base_dir + "/gemma4_26b_q4km_k-bf16_v-bf16";
     std::string dir_b = base_dir + "/qwen2.5_7b_q4km_k-q4_0_v-q4_0";
@@ -472,7 +478,7 @@ static void test_radix_tree_single_checkpoint_normalization() {
 }
 
 static void test_radix_cache_persistence_across_restart() {
-    const std::string test_dir = "/tmp/beellama_radix_persist_test_" +
+    const std::string test_dir = "/tmp/triellama_radix_persist_test_" +
                                  std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 
     server_prompt_data original_d1 = make_test_data(512, 128);
@@ -555,6 +561,283 @@ static void test_radix_cache_persistence_across_restart() {
     fs::remove_all(test_dir);
 }
 
+static void test_edge_case_empty_and_single_token() {
+    server_radix_tree tree;
+
+    // 1. Empty prompt insertion: must safely return nullptr without crash
+    auto p0 = make_test_prompt({});
+    auto d0 = make_test_data(32);
+    auto n0 = tree.insert(p0, std::move(d0));
+    assert(n0 == nullptr);
+    assert(tree.total_checkpoints() == 0);
+
+    // Empty prompt search: must safely return null match without crash
+    server_tokens req0(llama_tokens{}, false);
+    auto res0 = tree.find_best_match(req0, 1, 0);
+    assert(res0.node == nullptr);
+    assert(res0.restorable_tokens == 0);
+
+    // 2. Single token insertion
+    auto p1 = make_test_prompt({12345});
+    auto d1 = make_test_data(64);
+    auto n1 = tree.insert(p1, std::move(d1));
+    assert(n1 != nullptr);
+    assert(n1->token_depth == 1);
+    assert(tree.total_checkpoints() == 1);
+
+    // Single token exact match
+    server_tokens req1(llama_tokens{12345}, false);
+    auto res1 = tree.find_best_match(req1, 1, 0);
+    assert(res1.node == n1);
+    assert(res1.restorable_tokens == 1);
+
+    // Unmatched single token query
+    server_tokens req_mismatch(llama_tokens{99999}, false);
+    auto res_mismatch = tree.find_best_match(req_mismatch, 1, 0);
+    assert(res_mismatch.node == nullptr);
+    assert(res_mismatch.restorable_tokens == 0);
+}
+
+static void test_edge_case_deep_branching_and_chaining() {
+    server_radix_tree tree;
+
+    // Build a deep chain of 32 checkpoints, each extending by 4 tokens (depth 4..128)
+    llama_tokens base_tokens;
+    std::vector<std::shared_ptr<server_radix_node>> chain_nodes;
+    for (int i = 0; i < 32; ++i) {
+        for (int t = 0; t < 4; ++t) {
+            base_tokens.push_back(1000 + static_cast<llama_token>(base_tokens.size()));
+        }
+        auto p = make_test_prompt(base_tokens);
+        auto d = make_test_data(16 + i * 4);
+        auto node = tree.insert(p, std::move(d));
+        assert(node != nullptr);
+        assert(node->token_depth == base_tokens.size());
+        chain_nodes.push_back(node);
+    }
+    assert(tree.total_checkpoints() == 32);
+
+    // Fork at depth 64 (i = 15) with an alternative sequence
+    llama_tokens fork_tokens(base_tokens.begin(), base_tokens.begin() + 64);
+    fork_tokens.push_back(9999);
+    fork_tokens.push_back(8888);
+    auto p_fork = make_test_prompt(fork_tokens);
+    auto d_fork = make_test_data(100);
+    auto n_fork = tree.insert(p_fork, std::move(d_fork));
+    assert(n_fork != nullptr);
+    assert(n_fork->token_depth == 66);
+    assert(tree.total_checkpoints() == 33);
+
+    // Verify search on fork query
+    server_tokens req_fork(fork_tokens, false);
+    auto res_fork = tree.find_best_match(req_fork, 1, 0);
+    assert(res_fork.node == n_fork);
+    assert(res_fork.restorable_tokens == 66);
+
+    // Verify search on full base query
+    server_tokens req_full(base_tokens, false);
+    auto res_full = tree.find_best_match(req_full, 1, 0);
+    assert(res_full.node == chain_nodes.back());
+    assert(res_full.restorable_tokens == 128);
+}
+
+static void test_edge_case_identical_prompt_overwrite() {
+    server_radix_tree tree;
+    auto p = make_test_prompt({1, 2, 3, 4});
+
+    // First insert
+    auto d1 = make_test_data(32);
+    auto n1 = tree.insert(p, std::move(d1));
+    assert(n1 != nullptr);
+    assert(tree.total_checkpoints() == 1);
+    assert(n1->data.main.size() == 32);
+
+    // Second insert with different data length
+    auto d2 = make_test_data(128);
+    auto n2 = tree.insert(p, std::move(d2));
+    assert(n2 == n1); // Same node reused
+    assert(tree.total_checkpoints() == 1); // Checkpoint count must remain 1
+    assert(n2->data.main.size() == 128);
+}
+
+static void test_edge_case_corrupted_disk_checkpoint() {
+    std::string test_dir = "/tmp/triellama_corrupt_test_" + std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    fs::create_directories(test_dir);
+
+    server_radix_tree tree;
+    server_tier_manager tm;
+    bool init_ok = tm.init(test_dir, 64, &tree);
+    assert(init_ok);
+
+    auto p = make_test_prompt({5, 6, 7, 8});
+    auto d = make_test_data(256);
+    auto node = tree.insert(p, std::move(d));
+    assert(node != nullptr);
+
+    // Save to disk
+    bool s = tm.save_to_disk(node, tree);
+    assert(s);
+    assert(node->tier == RADIX_TIER_DISK);
+    assert(!node->disk_chunk_id.empty());
+    fs::path disk_filepath = fs::path(tm.get_disk_dir()) / node->disk_chunk_id;
+    assert(fs::exists(disk_filepath));
+
+    // Intentionally corrupt the file with invalid garbage bytes
+    {
+        std::ofstream ofs(disk_filepath, std::ios::binary | std::ios::trunc);
+        ofs << "TRUNCATED_GARBAGE";
+    }
+
+    // Attempt to load corrupted file from disk -> must fail gracefully without crash or throw
+    bool loaded = tm.load_from_disk(node);
+    assert(!loaded);
+
+    // Clean up
+    fs::remove_all(test_dir);
+}
+
+static void test_edge_case_zero_ram_direct_disk_streaming() {
+    std::string test_dir = "/tmp/triellama_zeroram_test_" + std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    fs::create_directories(test_dir);
+
+    server_radix_tree tree;
+    server_tier_manager tm;
+    bool init_ok = tm.init(test_dir, 64, &tree);
+    assert(init_ok);
+
+    auto p = make_test_prompt({10, 20, 30});
+    auto d = make_test_data(512);
+    auto original_payload = d.main;
+
+    auto node = tree.insert(p, std::move(d));
+    assert(node != nullptr);
+
+    // Enforce 0-RAM limit -> must immediately evict node payload to disk
+    tm.enforce_ram_limit(tree, 0);
+    assert(node->tier == RADIX_TIER_DISK);
+    assert(node->data.main.empty());
+    fs::path disk_filepath = fs::path(tm.get_disk_dir()) / node->disk_chunk_id;
+    assert(fs::exists(disk_filepath));
+
+    // Load back from disk when queried
+    bool loaded = tm.load_from_disk(node);
+    assert(loaded);
+    assert(node->data.main == original_payload);
+
+    // Clean up
+    fs::remove_all(test_dir);
+}
+
+static void test_edge_case_disk_quota_micro_limits() {
+    std::string test_dir = "/tmp/triellama_microquota_test_" + std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    fs::create_directories(test_dir);
+
+    // Put a non-checkpoint file in the directory
+    std::string dummy_file = test_dir + "/important_notes.txt";
+    {
+        std::ofstream ofs(dummy_file);
+        ofs << "Do not delete this configuration file!";
+    }
+
+    server_radix_tree tree;
+    server_tier_manager tm;
+    bool init_ok = tm.init(test_dir, 1, &tree); // 1 MiB quota
+    assert(init_ok);
+
+    auto p1 = make_test_prompt({1, 2, 3});
+    auto node1 = tree.insert(p1, make_test_data(500));
+    tm.save_to_disk(node1, tree);
+
+    auto p2 = make_test_prompt({1, 2, 3, 4, 5});
+    auto node2 = tree.insert(p2, make_test_data(500));
+    tm.save_to_disk(node2, tree);
+
+    // Enforce disk limit -> must not hang or throw, and must prune older chunks if needed
+    tm.enforce_disk_limit(tree);
+
+    // Verify the dummy non-.ckpt file was NOT deleted by the scavenger
+    assert(fs::exists(dummy_file));
+
+    // Clean up
+    fs::remove_all(test_dir);
+}
+
+
+static void test_snc_quantization_roundtrip_and_norm_invariance() {
+    // 1. All-zero edge case (tests norm division-by-zero protection in sqrt(sum_sq + epsilon))
+    {
+        constexpr int n = 64;
+        std::vector<float> zeros(n, 0.0f);
+        std::vector<block_snc4> b4(n / QK_SNC4);
+        std::vector<float> out4(n, -999.0f);
+
+        quantize_row_snc4_ref(zeros.data(), b4.data(), n);
+        dequantize_row_snc4(b4.data(), out4.data(), n);
+
+        for (int i = 0; i < n; ++i) {
+            assert(!std::isnan(out4[i]) && !std::isinf(out4[i]));
+            assert(std::fabs(out4[i]) < 1e-5f);
+        }
+
+        std::vector<block_snc8> b8(n / QK_SNC8);
+        std::vector<float> out8(n, -999.0f);
+
+        quantize_row_snc8_ref(zeros.data(), b8.data(), n);
+        dequantize_row_snc8(b8.data(), out8.data(), n);
+
+        for (int i = 0; i < n; ++i) {
+            assert(!std::isnan(out8[i]) && !std::isinf(out8[i]));
+            assert(std::fabs(out8[i]) < 1e-5f);
+        }
+    }
+
+    // 2. Normal distribution and dynamic range vector: test norm preservation
+    {
+        constexpr int n = 256;
+        std::vector<float> input(n);
+        float true_sum_sq = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            float val = std::sin(float(i) * 0.35f) * (1.0f + float(i % 7));
+            input[i] = val;
+            true_sum_sq += val * val;
+        }
+        float true_norm = std::sqrt(true_sum_sq);
+        assert(true_norm > 0.0f);
+
+        // Test snc4
+        std::vector<block_snc4> b4(n / QK_SNC4);
+        std::vector<float> out4(n, 0.0f);
+        quantize_row_snc4_ref(input.data(), b4.data(), n);
+        dequantize_row_snc4(b4.data(), out4.data(), n);
+
+        float snc4_sum_sq = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            assert(!std::isnan(out4[i]));
+            snc4_sum_sq += out4[i] * out4[i];
+        }
+        float snc4_norm = std::sqrt(snc4_sum_sq);
+        float snc4_norm_err = std::fabs(snc4_norm - true_norm) / true_norm;
+        // SNC4 norm must be preserved within 5%
+        assert(snc4_norm_err < 0.05f);
+
+        // Test snc8
+        std::vector<block_snc8> b8(n / QK_SNC8);
+        std::vector<float> out8(n, 0.0f);
+        quantize_row_snc8_ref(input.data(), b8.data(), n);
+        dequantize_row_snc8(b8.data(), out8.data(), n);
+
+        float snc8_sum_sq = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            assert(!std::isnan(out8[i]));
+            snc8_sum_sq += out8[i] * out8[i];
+        }
+        float snc8_norm = std::sqrt(snc8_sum_sq);
+        float snc8_norm_err = std::fabs(snc8_norm - true_norm) / true_norm;
+        // SNC8 norm must be preserved within 1%
+        assert(snc8_norm_err < 0.01f);
+    }
+}
+
 int main() {
     std::cout << "[test-radix-tree] Running tests...\n";
 
@@ -593,6 +876,27 @@ int main() {
 
     test_radix_cache_persistence_across_restart();
     std::cout << " - test_radix_cache_persistence_across_restart: PASSED\n";
+
+    test_edge_case_empty_and_single_token();
+    std::cout << " - test_edge_case_empty_and_single_token: PASSED\n";
+
+    test_edge_case_deep_branching_and_chaining();
+    std::cout << " - test_edge_case_deep_branching_and_chaining: PASSED\n";
+
+    test_edge_case_identical_prompt_overwrite();
+    std::cout << " - test_edge_case_identical_prompt_overwrite: PASSED\n";
+
+    test_edge_case_corrupted_disk_checkpoint();
+    std::cout << " - test_edge_case_corrupted_disk_checkpoint: PASSED\n";
+
+    test_edge_case_zero_ram_direct_disk_streaming();
+    std::cout << " - test_edge_case_zero_ram_direct_disk_streaming: PASSED\n";
+
+    test_edge_case_disk_quota_micro_limits();
+    std::cout << " - test_edge_case_disk_quota_micro_limits: PASSED\n";
+
+    test_snc_quantization_roundtrip_and_norm_invariance();
+    std::cout << " - test_snc_quantization_roundtrip_and_norm_invariance: PASSED\n";
 
     std::cout << "[test-radix-tree] All Radix Cache tests passed successfully!\n";
     return 0;
