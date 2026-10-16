@@ -123,8 +123,7 @@ def main() -> int:
         "--metrics", "--slots", "--offline", "--seed", "12345",
         "--load-mode", args.load_mode, "--verbosity", "5",
     ]
-    if args.kv_unified:
-        command.append("--kv-unified")
+
     if args.spec == "mtp":
         command += [
             "--spec-type", "draft-mtp", "--spec-draft-n-max", "2",

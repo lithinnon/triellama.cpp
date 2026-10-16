@@ -204,8 +204,6 @@ class ServerProcess:
             server_args.append("--reranking")
         if self.server_metrics:
             server_args.append("--metrics")
-        if self.kv_unified:
-            server_args.append("--kv-unified")
         if self.swa_full:
             server_args.append("--swa-full")
         if self.server_slots:
@@ -234,8 +232,6 @@ class ServerProcess:
             server_args.extend(["-fa", self.fa])
         if self.n_predict:
             server_args.extend(["--n-predict", self.n_predict])
-        if self.slot_save_path:
-            server_args.extend(["--slot-save-path", self.slot_save_path])
         if self.n_ga:
             server_args.extend(["--grp-attn-n", self.n_ga])
         if self.n_ga_w:
@@ -245,8 +241,6 @@ class ServerProcess:
         if self.lora_files:
             for lora_file in self.lora_files:
                 server_args.extend(["--lora", lora_file])
-        if self.enable_ctx_shift:
-            server_args.append("--context-shift")
         if self.spec_type:
             server_args.extend(["--spec-type", self.spec_type])
         if self.api_key:

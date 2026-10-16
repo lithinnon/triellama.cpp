@@ -34,7 +34,7 @@ def run(args, cache):
                "-c", str(args.context), "-b", "2048", "-ub", "512", "-fa", "on",
                "--cache-type-k", "kvarn6", "--cache-type-v", "kvarn6", "--kv-tail-tokens", "1024",
                "--spec-draft-type-k", key, "--spec-draft-type-v", value,
-               "--spec-draft-n-max", "8", "--parallel", "1", "--kv-unified",
+               "--spec-draft-n-max", "8", "--parallel", "1",
                "--host", "127.0.0.1", "--port", str(args.port), "--no-warmup", "-lv", "5"]
     if args.mmproj:
         command += ["--mmproj", str(args.mmproj.resolve()), "--image-min-tokens", str(args.image_min_tokens)]

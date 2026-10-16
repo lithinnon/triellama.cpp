@@ -32,8 +32,7 @@ def run(args, route, nslots):
                "-ub", "512", "-ubd", "128", "--parallel", str(nslots),
                "--load-mode", "dio", "--fit", "off", "--flash-attn", "on", "--seed", "1234",
                "--host", "127.0.0.1", "--port", str(args.port), "--no-warmup", "-lv", "5"]
-    if args.unified:
-        command.append("--kv-unified")
+
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = "0,1"
     if route == "materialized":

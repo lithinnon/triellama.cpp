@@ -1048,10 +1048,6 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
         params.mmproj_use_gpu = params.mmproj_device != nullptr;
     }
 
-    if (params.prompt_cache_all && (params.interactive || params.interactive_first)) {
-        throw std::invalid_argument("error: --prompt-cache-all not supported in interactive mode yet\n");
-    }
-
     const bool skip_model_download =
         // server will call common_params_handle_models() later, so we skip it here
         ctx_arg.ex == LLAMA_EXAMPLE_SERVER ||
@@ -2013,14 +2009,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_env("LLAMA_ARG_CACHE_DISK_DIR").set_examples({LLAMA_EXAMPLE_SERVER}));
     add_opt(common_arg(
-        {"-kvu", "--kv-unified"},
-        {"-no-kvu", "--no-kv-unified"},
-        "use single unified KV buffer shared across all sequences (default: enabled if number of slots is auto)",
-        [](common_params & params, bool value) {
-            params.kv_unified = value;
-        }
-    ).set_env("LLAMA_ARG_KV_UNIFIED").set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_PERPLEXITY, LLAMA_EXAMPLE_BATCHED, LLAMA_EXAMPLE_BENCH, LLAMA_EXAMPLE_PARALLEL}));
-    add_opt(common_arg(
         {"--cache-idle-slots"},
         {"--no-cache-idle-slots"},
         "save idle slots to the prompt cache on new task, and clear them when using unified KV (default: enabled, requires cache-ram)",
@@ -2028,14 +2016,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.cache_idle_slots = value;
         }
     ).set_env("LLAMA_ARG_CACHE_IDLE_SLOTS").set_examples({LLAMA_EXAMPLE_SERVER}));
-    add_opt(common_arg(
-        {"--context-shift"},
-        {"--no-context-shift"},
-        string_format("whether to use context shift on infinite text generation (default: %s)", params.ctx_shift ? "enabled" : "disabled"),
-        [](common_params & params, bool value) {
-            params.ctx_shift = value;
-        }
-    ).set_examples({LLAMA_EXAMPLE_COMPLETION, LLAMA_EXAMPLE_CLI, LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_IMATRIX, LLAMA_EXAMPLE_PERPLEXITY}).set_env("LLAMA_ARG_CONTEXT_SHIFT"));
     add_opt(common_arg(
         {"--chunks"}, "N",
         string_format("max number of chunks to process (default: %d, -1 = all)", params.n_chunks),
@@ -2153,27 +2133,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         string_format("print token count every N tokens (default: %d)", params.n_print),
         [](common_params & params, int value) {
             params.n_print = value;
-        }
-    ).set_examples({LLAMA_EXAMPLE_COMPLETION}));
-    add_opt(common_arg(
-        {"--prompt-cache"}, "FNAME",
-        "file to cache prompt state for faster startup (default: none)",
-        [](common_params & params, const std::string & value) {
-            params.path_prompt_cache = value;
-        }
-    ).set_examples({LLAMA_EXAMPLE_COMPLETION}));
-    add_opt(common_arg(
-        {"--prompt-cache-all"},
-        "if specified, saves user input and generations to cache as well\n",
-        [](common_params & params) {
-            params.prompt_cache_all = true;
-        }
-    ).set_examples({LLAMA_EXAMPLE_COMPLETION}));
-    add_opt(common_arg(
-        {"--prompt-cache-ro"},
-        "if specified, uses the prompt cache but does not update it",
-        [](common_params & params) {
-            params.prompt_cache_ro = true;
         }
     ).set_examples({LLAMA_EXAMPLE_COMPLETION}));
     add_opt(common_arg(
@@ -2868,15 +2827,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.ppl_output_type = value;
         }
     ).set_examples({LLAMA_EXAMPLE_PERPLEXITY}));
-    add_opt(common_arg(
-        {"-dt", "--defrag-thold"}, "N",
-        string_format("KV cache defragmentation threshold (DEPRECATED)"),
-        [](common_params & params, const std::string & value) {
-            GGML_UNUSED(params);
-            GGML_UNUSED(value);
-            LOG_WRN("DEPRECATED: --defrag-thold is deprecated and no longer necessary to specify\n");
-        }
-    ).set_env("LLAMA_ARG_DEFRAG_THOLD"));
     if (ex == LLAMA_EXAMPLE_SERVER) {
         // this is to make sure this option appears in the server-specific section of the help message
         add_opt(common_arg(
@@ -3934,24 +3884,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_THREADS_HTTP"));
     add_opt(common_arg(
-        {"--cache-prompt"},
-        {"--no-cache-prompt"},
-        string_format("whether to enable prompt caching (default: %s)", params.cache_prompt ? "enabled" : "disabled"),
-        [](common_params & params, bool value) {
-            params.cache_prompt = value;
-        }
-    ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_CACHE_PROMPT"));
-    add_opt(common_arg(
-        {"--cache-reuse"}, "N",
-        string_format(
-            "min chunk size to attempt reusing from the cache via KV shifting, requires prompt caching to be enabled (default: %d)\n"
-            "[(card)](https://ggml.ai/f0.png)", params.n_cache_reuse
-        ),
-        [](common_params & params, int value) {
-            params.n_cache_reuse = value;
-        }
-    ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_CACHE_REUSE"));
-    add_opt(common_arg(
         {"--metrics"},
         string_format("enable prometheus compatible metrics endpoint (default: %s)", params.endpoint_metrics ? "enabled" : "disabled"),
         [](common_params & params) {
@@ -3973,20 +3905,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.endpoint_slots = value;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_ENDPOINT_SLOTS"));
-    add_opt(common_arg(
-        {"--slot-save-path"}, "PATH",
-        "path to save slot kv cache (default: disabled)",
-        [](common_params & params, const std::string & value) {
-            params.slot_save_path = value;
-            if (!fs_is_directory(params.slot_save_path)) {
-                throw std::invalid_argument("not a directory: " + value);
-            }
-            // if doesn't end with DIRECTORY_SEPARATOR, add it
-            if (!params.slot_save_path.empty() && params.slot_save_path[params.slot_save_path.size() - 1] != DIRECTORY_SEPARATOR) {
-                params.slot_save_path += DIRECTORY_SEPARATOR;
-            }
-        }
-    ).set_examples({LLAMA_EXAMPLE_SERVER}));
     add_opt(common_arg(
         {"--media-path"}, "PATH",
         "directory for loading local media files; files can be accessed via file:// URLs using relative paths (default: disabled)",
@@ -5133,7 +5051,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.n_ubatch = 1024;
             params.n_batch = 1024;
             params.n_ctx = 0;
-            params.n_cache_reuse = 256;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}));
 
@@ -5147,7 +5064,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.n_ubatch = 1024;
             params.n_batch = 1024;
             params.n_ctx = 0;
-            params.n_cache_reuse = 256;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}));
 
@@ -5161,7 +5077,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.n_ubatch = 1024;
             params.n_batch = 1024;
             params.n_ctx = 0;
-            params.n_cache_reuse = 256;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}));
 
@@ -5177,7 +5092,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.n_ubatch = 1024;
             params.n_batch = 1024;
             params.n_ctx = 0;
-            params.n_cache_reuse = 256;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}));
 
@@ -5193,7 +5107,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.n_ubatch = 1024;
             params.n_batch = 1024;
             params.n_ctx = 0;
-            params.n_cache_reuse = 256;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}));
 
@@ -5207,7 +5120,6 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.n_ubatch = 1024;
             params.n_batch = 1024;
             params.n_ctx = 0;
-            params.n_cache_reuse = 256;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}));
 

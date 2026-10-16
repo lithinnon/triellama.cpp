@@ -140,7 +140,6 @@ llama-completion.exe -m models\gemma-1.1-7b-it.Q4_K_M.gguf --ignore-eos -n -1
 | `--kv-tail-type TYPE` | exact KV-cache tail type: f16 or bf16<br/>(default: bf16 for standard caches, f16 for KVarN)<br/>(env: LLAMA_ARG_KV_TAIL_TYPE) |
 | `--cache-type-k-swa TYPE` | SWA-layer KVarN cache type override for K<br/>allowed values: kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>(default: same as --cache-type-k)<br/>(env: LLAMA_ARG_CACHE_TYPE_K_SWA) |
 | `--cache-type-v-swa TYPE` | SWA-layer KVarN cache type override for V<br/>allowed values: kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>(default: same as --cache-type-v)<br/>(env: LLAMA_ARG_CACHE_TYPE_V_SWA) |
-| `-dt, --defrag-thold N` | KV cache defragmentation threshold (DEPRECATED)<br/>(env: LLAMA_ARG_DEFRAG_THOLD) |
 | `-np, --parallel N` | number of parallel sequences to decode (default: 1)<br/>(env: LLAMA_ARG_N_PARALLEL) |
 | `--rpc SERVERS` | comma-separated list of RPC servers (host:port)<br/>(env: LLAMA_ARG_RPC) |
 | `-lm, --load-mode MODE` | model loading mode (default: auto)<br/>- auto: mmap, unless a device does not support it<br/>- none: no special loading mode<br/>- mmap: memory-map model (if mmap disabled, slower load but may reduce pageouts if not using mlock)<br/>- mlock: force system to keep model in RAM rather than swapping or compressing<br/>- mmap+mlock: mmap + force system to keep model in RAM rather than swapping or compressing<br/>- dio: use DirectIO if available<br/><br/>(env: LLAMA_ARG_LOAD_MODE) |
@@ -232,14 +231,10 @@ llama-completion.exe -m models\gemma-1.1-7b-it.Q4_K_M.gguf --ignore-eos -n -1
 | -------- | ----------- |
 | `--verbose-prompt` | print a verbose prompt before generation (default: false) |
 | `--display-prompt, --no-display-prompt` | whether to print prompt at generation (default: true) |
-| `-co, --color [on\|off\|auto]` | Colorize output to distinguish prompt and user input from generations ('on', 'off', or 'auto', default: 'auto')<br/>'auto' enables colors when output is to a terminal |
-| `--context-shift, --no-context-shift` | whether to use context shift on infinite text generation (default: disabled)<br/>(env: LLAMA_ARG_CONTEXT_SHIFT) |
+| `-co, --color [on|off|auto]` | Colorize output to distinguish prompt and user input from generations ('on', 'off', or 'auto', default: 'auto')<br/>'auto' enables colors when output is to a terminal |
 | `-sys, --system-prompt PROMPT` | system prompt to use with model (if applicable, depending on chat template) |
 | `-sysf, --system-prompt-file FNAME` | a file containing the system prompt (default: none) |
 | `-ptc, --print-token-count N` | print token count every N tokens (default: -1) |
-| `--prompt-cache FNAME` | file to cache prompt state for faster startup (default: none) |
-| `--prompt-cache-all` | if specified, saves user input and generations to cache as well |
-| `--prompt-cache-ro` | if specified, uses the prompt cache but does not update it |
 | `-r, --reverse-prompt PROMPT` | halt generation at PROMPT, return control in interactive mode |
 | `-sp, --special` | special tokens output enabled (default: false) |
 | `-cnv, --conversation, -no-cnv, --no-conversation` | whether to run in conversation mode:<br/>- does not print special tokens and suffix/prefix<br/>- interactive mode is also enabled<br/>(default: auto enabled if chat template is available) |
@@ -383,8 +378,6 @@ The `--predict` option controls the number of tokens the model generates in resp
 A value of -1 will enable infinite text generation, even though we have a finite context window. When the context window is full, some of the earlier tokens (half of the tokens after `--keep`) will be discarded. The context must then be re-evaluated before generation can resume. On large models and/or large context windows, this will result in a significant pause in output.
 
 If the pause is undesirable, a value of -2 will stop generation immediately when the context is filled.
-
-The `--no-context-shift` option allows you to stop the infinite text generation once the finite context window is full.
 
 It is important to note that the generated text may be shorter than the specified number of tokens if an End-of-Sequence (EOS) token or a reverse prompt is encountered. In interactive mode, text generation will pause and control will be returned to the user. In non-interactive mode, the program will end. In both cases, the text generation may stop before reaching the specified `--predict` value. If you want the model to keep going without ever producing End-of-Sequence on its own, you can use the `--ignore-eos` parameter.
 
@@ -559,10 +552,6 @@ These options help improve the performance and memory usage of the LLaMA models.
 - `-ub N`, `--ubatch-size N`: Physical batch size. This is the maximum number of tokens that may be processed at a time. Increasing this value may improve performance during prompt processing, at the expense of higher memory usage. Default: `512`.
 
 - `-b N`, `--batch-size N`: Logical batch size. Increasing this value above the value of the physical batch size may improve prompt processing performance when using multiple GPUs with pipeline parallelism. Default: `2048`.
-
-### Prompt Caching
-
--   `--prompt-cache FNAME`: Specify a file to cache the model state after the initial prompt. This can significantly speed up the startup time when you're using longer prompts. The file is created during the first run and is reused and updated in subsequent runs. **Note**: Restoring a cached prompt does not imply restoring the exact state of the session at the point it was saved. So even when specifying a specific seed, you are not guaranteed to get the same sequence of tokens as the original generation.
 
 ### Grammars & JSON schemas
 

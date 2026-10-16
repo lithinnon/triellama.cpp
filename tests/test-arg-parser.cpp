@@ -525,11 +525,11 @@ static void test(void) {
     assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_COMMON));
 
     params = common_params();
-    argv = {"binary_name", "-m", "model_file.gguf", "--kv-unified", "--cache-type-k", "kvarn4"};
+    argv = {"binary_name", "-m", "model_file.gguf", "--cache-type-k", "kvarn4"};
     assert(true == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
     assert(params.kvarn.type == LLAMA_KVARN_K4V4_G128);
-    assert(params.kv_unified);
-    assert(common_context_params_to_llama(params).kv_unified);
+    assert(!params.kv_unified);
+    assert(!common_context_params_to_llama(params).kv_unified);
 
     params = common_params();
     argv = {"binary_name", "-m", "model_file.gguf", "--cache-type-k", "kvarn3"};
@@ -919,6 +919,38 @@ static void test(void) {
     argv = {"binary_name", "-cms", "512"};
     assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
     argv = {"binary_name", "--checkpoint-min-step", "512"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+
+    // verify newly removed conflicting/redundant flags fail parsing
+    argv = {"binary_name", "--kv-unified"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "-kvu"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--no-kv-unified"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "-no-kvu"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--context-shift"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--no-context-shift"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--cache-prompt"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--no-cache-prompt"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--cache-reuse", "256"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--slot-save-path", "/tmp"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--prompt-cache", "session.bin"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_COMPLETION));
+    argv = {"binary_name", "--prompt-cache-all"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_COMPLETION));
+    argv = {"binary_name", "--prompt-cache-ro"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_COMPLETION));
+    argv = {"binary_name", "-dt", "1"};
+    assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
+    argv = {"binary_name", "--defrag-thold", "1"};
     assert(false == common_params_parse(argv.size(), list_str_to_char(argv).data(), params, LLAMA_EXAMPLE_SERVER));
 
 // skip this part on windows, because setenv is not supported

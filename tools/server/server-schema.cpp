@@ -85,7 +85,7 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &
 
     add((new field_num("n_cache_reuse", params.n_cache_reuse))
         ->set_hard_limits(0, INT32_MAX)
-        ->set_desc("Min chunk size to attempt reusing from the cache via KV shifting. See --cache-reuse arg"));
+        ->set_desc("Min chunk size to attempt reusing from the cache via KV shifting"));
 
     // TODO: implement t_max_prompt_ms
     // add((new field_num("t_max_prompt_ms", params.t_max_prompt_ms))

@@ -57,7 +57,6 @@
 | `--kv-tail-type TYPE` | exact KV-cache tail type: f16 or bf16<br/>(default: bf16 for standard caches, f16 for KVarN)<br/>(env: LLAMA_ARG_KV_TAIL_TYPE) |
 | `--cache-type-k-swa TYPE` | SWA-layer KVarN cache type override for K<br/>allowed values: kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>(default: same as --cache-type-k)<br/>(env: LLAMA_ARG_CACHE_TYPE_K_SWA) |
 | `--cache-type-v-swa TYPE` | SWA-layer KVarN cache type override for V<br/>allowed values: kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>(default: same as --cache-type-v)<br/>(env: LLAMA_ARG_CACHE_TYPE_V_SWA) |
-| `-dt, --defrag-thold N` | KV cache defragmentation threshold (DEPRECATED)<br/>(env: LLAMA_ARG_DEFRAG_THOLD) |
 | `-np, --parallel N` | number of parallel sequences to decode (default: 1)<br/>(env: LLAMA_ARG_N_PARALLEL) |
 | `--rpc SERVERS` | comma-separated list of RPC servers (host:port)<br/>(env: LLAMA_ARG_RPC) |
 | `-lm, --load-mode MODE` | model loading mode (default: auto)<br/>- auto: mmap, unless a device does not support it<br/>- none: no special loading mode<br/>- mmap: memory-map model (if mmap disabled, slower load but may reduce pageouts if not using mlock)<br/>- mlock: force system to keep model in RAM rather than swapping or compressing<br/>- mmap+mlock: mmap + force system to keep model in RAM rather than swapping or compressing<br/>- dio: use DirectIO if available<br/><br/>(env: LLAMA_ARG_LOAD_MODE) |
@@ -152,7 +151,6 @@
 | `--display-prompt, --no-display-prompt` | whether to print prompt at generation (default: true) |
 | `-co, --color [on\|off\|auto]` | Colorize output to distinguish prompt and user input from generations ('on', 'off', or 'auto', default: 'auto')<br/>'auto' enables colors when output is to a terminal |
 | `-cram, --cache-ram N` | set the maximum cache size in MiB (default: 8192, -1 - no limit, 0 - disable)[(more info)](https://github.com/ggml-org/llama.cpp/pull/16391)<br/>(env: LLAMA_ARG_CACHE_RAM) |
-| `--context-shift, --no-context-shift` | whether to use context shift on infinite text generation (default: disabled)<br/>(env: LLAMA_ARG_CONTEXT_SHIFT) |
 | `-sys, --system-prompt PROMPT` | system prompt to use with model (if applicable, depending on chat template) |
 | `--show-timings, --no-show-timings` | whether to show timing information after each response (default: true)<br/>(env: LLAMA_ARG_SHOW_TIMINGS) |
 | `-sysf, --system-prompt-file FNAME` | a file containing the system prompt (default: none) |

@@ -255,8 +255,6 @@ class Server:
             "--cache-type-v", self.args.cache_type,
             "--cache-ram", str(self.args.cache_ram_mib),
         ]
-        if self.args.unified:
-            command.append("--kv-unified")
         if self.args.tail_tokens:
             command += ["--kv-tail-tokens", str(self.args.tail_tokens), "--kv-tail-type", self.args.tail_type]
         if self.args.spec == "mtp":
